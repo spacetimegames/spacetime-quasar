@@ -13,7 +13,7 @@ It states where the project stands; the linked pages hold the detail.
 | Item | State
 
 | Current phase
-| Phase 0 (Bootstrap), in progress.
+| Phase 0 (Bootstrap). All deliverables are merged and the owner hands-on test passed on 2026-10-11. Only the phase-gate review remains.
 
 | Next phase
 | Phase 1 (Base crates).
@@ -22,7 +22,7 @@ It states where the project stands; the linked pages hold the detail.
 | Protected. Changes go through a pull request with all 9 required checks green and the branch up to date. Merges are squash-only.
 
 | In flight
-| Flake package and checks (SPAC-101), in review.
+| Phase-gate review for Phase 0.
 
 | Blocked
 | None.
@@ -38,28 +38,28 @@ All of this is on `main`.
 * Dev shell: `nix develop` gives the pinned Rust 1.99.0 plus sccache, cargo-deny, and mold on Linux only (xref:../adr/0001-toolchain-msrv-nix.adoc[ADR 0001], xref:../adr/0004-build-resources.adoc[ADR 0004]). `nix fmt` works.
 * Cargo workspace: 12 `st-*` crate stubs, `tools/xtask` and `apps/spacetime-quasar` (opens the window). It builds and passes fmt, clippy with `-D warnings`, and tests. It also checks on wasm32.
 * CI (GitHub Actions) runs 9 required checks: `fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs` and `nix`. See xref:../adr/0003-ci-design.adoc[ADR 0003].
-* `nix run` starts the game: `packages.default` is built with crane and wraps the Vulkan, Wayland, xkbcommon and X11 libraries through `RUNPATH`. `nix flake check` mirrors the CI gates that can run under Nix (fmt, nixfmt, clippy, test, bench build, doc, asciidoc, deny without advisories, wasm32); the `nix` CI job runs it.
-* Window: a visible window through `st-render` (wgpu on Vulkan, ADR 0005) that closes on close or Escape; verified on NixOS with COSMIC on Wayland and an RTX 3080 Laptop GPU (xref:../20-platforms/nixos-cosmic.adoc[platform notes]).
+* `nix run github:spacetimegames/spacetime-quasar`, or `nix run` in a checkout, opens the visible window. `packages.default` is built with crane and wraps the Vulkan, Wayland, xkbcommon and X11 libraries through `RUNPATH`. `nix flake check` mirrors the CI gates that can run under Nix (fmt, nixfmt, clippy, test, bench build, doc, asciidoc, deny without advisories, wasm32); the `nix` CI job runs it.
+* Window: a visible window through `st-render` (wgpu on Vulkan, ADR 0005) that closes on close or Escape; the owner hands-on test passed on 2026-10-11 on NixOS with COSMIC on Wayland, on both the RTX 3080 Laptop GPU and the integrated Intel GPU (xref:try/phase-0.adoc#_result[test result], xref:../20-platforms/nixos-cosmic.adoc[platform notes]).
 * Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0005, the product decision records PD-01 to PD-26, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
-
-== In progress
-
-* Flake package and checks (SPAC-101).
 
 == Next
 
-Remaining Phase 0 work:
+Phase 0 is complete except for the phase-gate review, the last step.
+Phase 1 (Base crates) comes next.
 
-. The owner test, using the xref:try/phase-0.adoc[Phase 0 hands-on test note].
-. The phase-gate review.
-
-Phase 1 (Base crates) needs these ADRs:
+Phase 1 ADRs:
 
 * `nalgebra` vs `glam` boundary.
 * Large-world coordinates and f32 vs f64. It uses the answered space-scale decision (PD-26).
 * Determinism implementation.
 * Command log and replay format.
 * Data schema versioning.
+
+Then the Phase 1 crates and tooling:
+
+* `st-math`, `st-time`, `st-rng`, `st-data` and `st-platform`.
+* The determinism harness with a cross-platform hash job.
+* A Phase 1 CLI demo.
 
 == Known problems
 

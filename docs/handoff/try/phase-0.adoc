@@ -50,6 +50,16 @@ For each item above, tell us in plain words either "OK" or what happened.
 Also paste any text the terminal printed, especially anything that looks like an error.
 No technical detail is needed.
 
+== Result
+
+Owner hands-on test, 2026-10-11: *PASS*.
+
+* [human] 2026-10-11, NixOS with COSMIC on Wayland, NVIDIA RTX 3080 Laptop GPU class (hybrid laptop).
+* The default adapter was `NVIDIA GeForce RTX 3080 Laptop GPU (Vulkan)`.
+* With `WGPU_POWER_PREF=low` it was `Intel(R) UHD Graphics (TGL GT1) (Vulkan)`.
+* On both adapters: resize, maximise and restore, Escape, the close button, and COSMIC tiling and workspaces were all OK.
+* Fullscreen worked both ways on COSMIC: Super+F11 and the window control.
+
 == Known limits
 
 * There is no content yet. Nothing is drawn but the background.

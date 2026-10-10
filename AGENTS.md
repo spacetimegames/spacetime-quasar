@@ -11,7 +11,7 @@ is the short version. Where a rule has an ADR, the ADR wins.
 
 - [docs/index.adoc](docs/index.adoc): map of all documentation.
 - [docs/adr/index.adoc](docs/adr/index.adoc): binding ADRs. 0001 toolchain/MSRV/Nix,
-  0002 dependencies, 0003 CI, 0004 build resources for parallel Builders.
+  0002 dependencies, 0003 CI, 0004 build resources for parallel Builders, 0005 Phase 0 window presentation.
 - [docs/decisions/index.adoc](docs/decisions/index.adoc): product decisions of record (PD-xx).
 - [docs/60-contributing.adoc](docs/60-contributing.adoc): git flow, Definition of Done,
   verification tags, PR conventions, docs rules.
@@ -77,12 +77,22 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-These three were run by an agent inside `nix develop` on the reference dev machine
-(untagged, passing). `cargo deny check` and the MSRV job are also required but are not
-wired up yet, so they have not been run. CI enforcement is defined by
-[ADR 0003](docs/adr/0003-ci-design.adoc) and is being set up in Phase 0; do not assume it
-runs yet. From Phase 1: cross-platform determinism hash. From Phase 2: renderer checks
-on lavapipe with golden images (updating a golden needs Reviewer approval).
+CI is live ([ADR 0003](docs/adr/0003-ci-design.adoc)). The 9 required checks are
+`fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`,
+`wasm32`, `msrv`, `deny`, `docs` and `nix`. `main` is protected: merging needs a PR
+with all checks green and an up-to-date branch, and merges are squash-only. From
+Phase 1: cross-platform determinism hash. From Phase 2: renderer checks on lavapipe
+with golden images (updating a golden needs Reviewer approval).
+
+## Build
+
+Per [ADR 0004](docs/adr/0004-build-resources.adoc):
+
+- Iterate with cargo inside `nix develop`. It is incremental and uses sccache through
+  `RUSTC_WRAPPER`. Do not set `SCCACHE_DIR`.
+- Builders use the shared `target-slot-<n>` directories as `CARGO_TARGET_DIR`.
+- `nix build` and `nix flake check` are final checks for flake or packaging changes,
+  not the inner loop.
 
 ## Definition of Done (Subtask)
 
@@ -118,6 +128,8 @@ fine in benchmark and verification records. Use repo-relative paths or
 
 `nix develop` gives the pinned toolchain. Docs check:
 `nix shell nixpkgs#asciidoctor -c asciidoctor --failure-level WARN -o /dev/null <file>.adoc`.
+
+A fresh clone has no `graft/INDEX.md` until `graft build` runs.
 
 <!-- graft:start -->
 ## Graft — repo context graph

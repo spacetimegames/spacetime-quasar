@@ -18,16 +18,26 @@ The project is unrelated to SpacetimeDB.
 
 == Status
 
-Phase 0 (bootstrap). Nothing is playable yet; a stub binary exists that does nothing yet.
+Phase 0 (bootstrap) is complete apart from the phase-gate review. Nothing is playable yet.
+The binary opens an empty window with nothing drawn but a dark background.
 
-What works today:
+To try it, with Nix and flakes enabled:
+
+[source,sh]
+----
+nix run github:spacetimegames/spacetime-quasar
+----
+
+The first run builds from source and takes a few minutes.
+Press Escape or close the window to quit.
+See the xref:docs/handoff/try/phase-0.adoc[Phase 0 hands-on note].
+
+To work on the code, enter the dev shell with the pinned toolchain (see xref:docs/adr/0001-toolchain-msrv-nix.adoc[ADR 0001]):
 
 [source,sh]
 ----
 nix develop
 ----
-
-This enters a shell with the pinned toolchain (see xref:docs/adr/0001-toolchain-msrv-nix.adoc[ADR 0001]).
 
 == Repository layout
 
@@ -38,10 +48,10 @@ This enters a shell with the pinned toolchain (see xref:docs/adr/0001-toolchain-
 | `docs/` | All documentation; start at xref:docs/index.adoc[the docs index].
 | `docs/adr/` | Architecture Decision Records.
 | `docs/decisions/` | Product decisions of record.
-| `crates/` | Workspace crates (`st-*`); stubs only so far.
-| `apps/` | The thin game binary; a stub so far.
-| `tools/xtask/` | Developer task runner; a stub so far.
-| `flake.nix`, `flake.lock` | Nix development shell.
+| `crates/` | Workspace crates (`st-*`); mostly stubs so far.
+| `apps/` | The thin game binary; it opens the window.
+| `tools/xtask/` | Developer task runner.
+| `flake.nix`, `flake.lock` | Nix package, checks and development shell.
 | `rust-toolchain.toml` | Exact Rust toolchain pin.
 | `AGENTS.md` | Operating manual for coding agents.
 |===
