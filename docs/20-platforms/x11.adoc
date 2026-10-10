@@ -1,0 +1,6 @@
+= Platform: Linux (X11)
+:description: Build and run notes for Linux under X11.
+
+Scope: supported setup, known issues and verification status for Linux under X11.
+
+Status: not yet written (planned for Phase 6)

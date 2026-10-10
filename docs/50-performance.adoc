@@ -1,0 +1,6 @@
+= Performance
+:description: Performance budget and benchmark replay results over time.
+
+Scope: the frame budget and benchmark replay results over time.
+
+Status: not yet written (planned for Phase 2)

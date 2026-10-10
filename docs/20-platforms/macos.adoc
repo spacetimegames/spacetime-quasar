@@ -1,0 +1,6 @@
+= Platform: macOS
+:description: Build and run notes for macOS.
+
+Scope: supported setup, known issues and verification status for macOS.
+
+Status: not yet written (planned for Phase 6)

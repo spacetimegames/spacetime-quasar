@@ -1,0 +1,6 @@
+= Getting started
+:description: Entry point for new readers and contributors.
+
+Scope: how to obtain the repository, set up the toolchain and run the project for the first time.
+
+Status: not yet written (planned for Phase 0)

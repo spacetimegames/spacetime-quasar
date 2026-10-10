@@ -1,0 +1,6 @@
+= Platform: Windows
+:description: Build and run notes for Windows.
+
+Scope: supported setup, known issues and verification status for Windows.
+
+Status: not yet written (planned for Phase 6)

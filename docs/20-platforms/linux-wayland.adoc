@@ -1,0 +1,6 @@
+= Platform: Linux (Wayland)
+:description: Build and run notes for Linux under Wayland.
+
+Scope: supported setup, known issues and verification status for Linux under Wayland.
+
+Status: not yet written (planned for Phase 0)

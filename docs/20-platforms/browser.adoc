@@ -1,0 +1,6 @@
+= Platform: Browser
+:description: Build and run notes for the browser target (post-MVP).
+
+Scope: the browser target; it is post-MVP, see xref:../decisions/pd-11-browser-target.adoc[PD-11].
+
+Status: not yet written (planned for Phase 6, post-MVP)
