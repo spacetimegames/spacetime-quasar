@@ -1,0 +1,43 @@
+= ADR NNNN: Short decision title
+:toc: macro
+
+// Copy this file to `NNNN-short-slug.adoc` (next free number, four digits),
+// fill every section, and add a row to `index.adoc` in the same commit.
+// An accepted ADR is not rewritten: a later ADR supersedes it, and both
+// Status sections say so. Typo fixes and register tables that an ADR
+// declares as living are the only in-place edits allowed.
+
+toc::[]
+
+== Status
+
+One of `Proposed`, `Accepted`, `Superseded by ADR NNNN`, `Deprecated`.
+
+== Date
+
+YYYY-MM-DD (the day the status last changed).
+
+== Context
+
+The problem, the forces at play and the constraints that bind the decision
+(charter rules, earlier ADRs, measured facts).
+Facts taken from outside the repository carry the date they were verified.
+
+== Decision
+
+What is decided, stated so that a Builder can implement it without asking.
+Use exact values (versions, names, paths relative to the repository or to
+`<workspace-root>`).
+
+== Alternatives considered
+
+Each serious alternative, and why it lost.
+
+== Consequences
+
+What becomes easier, what becomes harder, what follow-up work is created,
+and what would make us revisit the decision.
+
+== References
+
+Links to sources, related ADRs and Jira keys.
