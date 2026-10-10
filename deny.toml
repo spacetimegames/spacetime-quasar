@@ -1,0 +1,100 @@
+# cargo-deny configuration, specified by docs/adr/0002-dependency-policy.adoc.
+# Change it only together with that ADR.
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown",
+    "wasm32-wasip1",
+]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "workspace"
+unsound = "all"
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+exceptions = []
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # D4. Exact names only (no globs); the CI deny job adds a Cargo.lock prefix check.
+    { crate = "bevy", reason = "D4: game engine" },
+    { crate = "bevy_internal", reason = "D4: game engine" },
+    { crate = "bevy_app", reason = "D4: game engine" },
+    { crate = "bevy_ecs", reason = "D4: game engine" },
+    { crate = "bevy_render", reason = "D4: game engine" },
+    { crate = "bevy_pbr", reason = "D4: game engine" },
+    { crate = "bevy_core_pipeline", reason = "D4: game engine" },
+    { crate = "bevy_asset", reason = "D4: game engine" },
+    { crate = "bevy_window", reason = "D4: game engine" },
+    { crate = "bevy_winit", reason = "D4: game engine" },
+    { crate = "bevy_ui", reason = "D4: game engine" },
+    { crate = "bevy_sprite", reason = "D4: game engine" },
+    { crate = "bevy_scene", reason = "D4: game engine" },
+    { crate = "bevy_gizmos", reason = "D4: game engine" },
+    { crate = "bevy_reflect", reason = "D4: game engine" },
+    { crate = "bevy_math", reason = "D4: game engine" },
+    { crate = "bevy_tasks", reason = "D4: game engine" },
+    { crate = "bevy_utils", reason = "D4: game engine" },
+    { crate = "bevy_platform", reason = "D4: game engine" },
+    { crate = "bevy_transform", reason = "D4: game engine" },
+    { crate = "bevy_input", reason = "D4: game engine" },
+    { crate = "bevy_time", reason = "D4: game engine" },
+    { crate = "godot", reason = "D4: game engine" },
+    { crate = "godot-core", reason = "D4: game engine" },
+    { crate = "godot-ffi", reason = "D4: game engine" },
+    { crate = "godot-macros", reason = "D4: game engine" },
+    { crate = "gdnative", reason = "D4: game engine" },
+    { crate = "gdnative-core", reason = "D4: game engine" },
+    { crate = "gdnative-sys", reason = "D4: game engine" },
+    { crate = "fyrox", reason = "D4: game engine" },
+    { crate = "fyrox-impl", reason = "D4: game engine" },
+    { crate = "fyrox-core", reason = "D4: game engine" },
+    { crate = "fyrox-ui", reason = "D4: game engine" },
+    { crate = "fyrox-graphics", reason = "D4: game engine" },
+    { crate = "fyrox-resource", reason = "D4: game engine" },
+    { crate = "fyrox-sound", reason = "D4: game engine" },
+    { crate = "rg3d", reason = "D4: game engine" },
+    { crate = "rg3d-core", reason = "D4: game engine" },
+    { crate = "rg3d-ui", reason = "D4: game engine" },
+    { crate = "rg3d-sound", reason = "D4: game engine" },
+    { crate = "three-d", reason = "D4: game engine" },
+    { crate = "three-d-asset", reason = "D4: game engine" },
+    { crate = "rend3", reason = "D4: unmaintained renderer" },
+    { crate = "rend3-routine", reason = "D4: unmaintained renderer" },
+    { crate = "rend3-types", reason = "D4: unmaintained renderer" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
