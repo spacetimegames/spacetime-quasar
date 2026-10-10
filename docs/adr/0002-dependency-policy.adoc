@@ -28,7 +28,9 @@ The charter binds this decision:
 * New dependencies need Architect sign-off; non-trivial ones need an ADR.
 * Preferred mature crates: Rapier, Parry, wgpu, winit, bytemuck, image,
   serde with ron. wgpu is fixed at 30.x.
-* Phase 0 delivers an empty window; the renderer arrives in Phase 2.
+* Phase 0 delivers an empty window; the renderer arrives in Phase 2 (in
+  Phase 0, wgpu only clears and presents the window, see
+  xref:0005-phase0-window-presentation.adoc[ADR 0005]).
 
 === Facts verified on 2026-10-10
 
@@ -149,7 +151,8 @@ chosen by ADR before the first public build.
 ! grep -E '^name = "(bevy|godot|gdnative|fyrox|rg3d|three-d|rend3)([-_][a-z0-9_-]*)?"$' Cargo.lock
 ----
 * `multiple-versions = "warn"`: the winit and wgpu trees already carry
-  duplicates (verified), so `deny` would block Phase 2. The warnings stay
+  duplicates (verified), so `deny` would block them (wgpu enters in Phase 0
+  for window presentation, see ADR 0005). The warnings stay
   visible in CI logs.
 * `wildcards = "deny"` with `allow-wildcard-paths = true`: version
   requirements must be explicit; path dependencies between private
