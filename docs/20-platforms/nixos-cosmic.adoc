@@ -3,4 +3,37 @@
 
 Scope: supported setup, known issues and verification status for NixOS with the COSMIC desktop.
 
-Status: not yet written (planned for Phase 0)
+== Setup
+
+* NixOS on the unstable channel with flakes enabled.
+* GPU drivers come from the host (`hardware.graphics`); the flake never bundles them.
+* The window uses wgpu on Vulkan (xref:../adr/0005-phase0-window-presentation.adoc[ADR 0005]).
+
+== Run
+
+[source,sh]
+----
+nix run                              # build and start the game
+nix run . -- --exit-after-ms 3000    # start, then exit with status 0
+nix build && ./result/bin/spacetime-quasar
+nix develop                          # dev shell, then cargo run -p spacetime-quasar
+nix flake check                      # CI gates that run under Nix
+----
+
+The package adds the Vulkan loader, Wayland, `libxkbcommon` and X11 libraries to the binary's `RUNPATH` (xref:../adr/0001-toolchain-msrv-nix.adoc[ADR 0001]).
+No `LD_LIBRARY_PATH` is needed outside the dev shell.
+
+== Verified on the reference dev machine
+
+NixOS (unstable), COSMIC on Wayland, hybrid Intel and NVIDIA GeForce RTX 3080 Laptop GPU.
+
+* `nix build` and `./result/bin/spacetime-quasar --exit-after-ms 2000` exit 0 and log the RTX 3080 Laptop adapter on Vulkan.
+* `env -u LD_LIBRARY_PATH nix run . -- --exit-after-ms 3000` exits 0 and logs the same adapter, so the wrapping works from a plain shell.
+* `nix flake check` passes for `x86_64-linux`. `nix flake check --all-systems --no-build` evaluates the `aarch64-darwin` outputs.
+* `nix develop -c cargo deny --locked check bans licenses sources` passes.
+
+== Known issues
+
+* Native X11 sessions are not tested (open point #15, parked until Phase 6).
+* The OpenGL backend is not supported on Wayland in Phase 0 (ADR 0005).
+* The non-Nix `cargo build` path is not verified on this machine.

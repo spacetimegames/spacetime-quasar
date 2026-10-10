@@ -1,5 +1,5 @@
 {
-  description = "spacetime-quasar: toolchain and development shell";
+  description = "spacetime-quasar: game package, checks and development shell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -7,7 +7,7 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # Used by the package and checks outputs, which a later Subtask adds.
+    # Builds the package and the checks (ADR 0001).
     crane.url = "github:ipetkov/crane";
   };
 
@@ -15,6 +15,7 @@
     {
       nixpkgs,
       rust-overlay,
+      crane,
       ...
     }:
     let
@@ -34,24 +35,198 @@
             };
           }
         );
+
+      # Libraries that winit and wgpu dlopen at run time (ADR 0001, ADR 0005).
+      # Used on Linux only: the darwin package does not reference them.
+      runtimeLibsFor =
+        pkgs: with pkgs; [
+          vulkan-loader
+          wayland
+          libxkbcommon
+          libx11
+          libxcursor
+          libxi
+          libxrandr
+        ];
+
+      # Per-system build setup shared by the package and the checks.
+      buildFor =
+        pkgs:
+        let
+          inherit (pkgs) lib;
+          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+          # Cargo sources plus the config files the checks read.
+          src = lib.cleanSourceWith {
+            src = ./.;
+            filter =
+              path: type:
+              (craneLib.filterCargoSources path type)
+              || builtins.elem (baseNameOf path) [
+                "deny.toml"
+                "rustfmt.toml"
+              ];
+            name = "source";
+          };
+          common = {
+            inherit src;
+            strictDeps = true;
+            pname = "spacetime-quasar";
+            version = "0.0.0";
+          };
+          cargoArtifacts = craneLib.buildDepsOnly common;
+        in
+        {
+          inherit
+            lib
+            craneLib
+            common
+            cargoArtifacts
+            ;
+        };
     in
     {
       formatter = forAllSystems ({ pkgs, ... }: pkgs.nixfmt);
+
+      packages = forAllSystems (
+        { pkgs, ... }:
+        let
+          inherit (buildFor pkgs)
+            lib
+            craneLib
+            common
+            cargoArtifacts
+            ;
+          isLinux = pkgs.stdenv.hostPlatform.isLinux;
+          rpath = lib.makeLibraryPath (runtimeLibsFor pkgs);
+          game = craneLib.buildPackage (
+            common
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs = "--locked -p spacetime-quasar";
+              # The checks run the tests.
+              doCheck = false;
+              nativeBuildInputs = lib.optionals isLinux [ pkgs.patchelf ];
+              # winit and wgpu dlopen these libraries; they are not DT_NEEDED
+              # entries. glibc searches the caller's RUNPATH for dlopen, so no
+              # LD_LIBRARY_PATH is needed (ADR 0001).
+              postFixup = lib.optionalString isLinux ''
+                patchelf --add-rpath ${rpath} $out/bin/spacetime-quasar
+              '';
+              meta.mainProgram = "spacetime-quasar";
+            }
+          );
+        in
+        {
+          default = game;
+        }
+      );
+
+      checks = forAllSystems (
+        { pkgs, system, ... }:
+        let
+          inherit (buildFor pkgs)
+            lib
+            craneLib
+            common
+            cargoArtifacts
+            ;
+          # Every AsciiDoc file, for the documentation check.
+          docsSrc = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.fileFilter (file: file.hasExt "adoc") ./.;
+          };
+          wasmArgs = common // {
+            CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+            doCheck = false;
+          };
+        in
+        {
+          fmt = craneLib.cargoFmt { inherit (common) src pname version; };
+
+          nixfmt = pkgs.runCommand "nixfmt-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
+            nixfmt --check ${./flake.nix}
+            touch $out
+          '';
+
+          clippy = craneLib.cargoClippy (
+            common
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+            }
+          );
+
+          test = craneLib.cargoTest (
+            common
+            // {
+              inherit cargoArtifacts;
+              cargoTestExtraArgs = "--workspace";
+            }
+          );
+
+          bench-build = craneLib.mkCargoDerivation (
+            common
+            // {
+              inherit cargoArtifacts;
+              pnameSuffix = "-bench-build";
+              buildPhaseCargoCommand = "cargo bench --workspace --no-run --locked";
+              doInstallCargoArtifacts = false;
+              installPhaseCommand = "touch $out";
+            }
+          );
+
+          doc = craneLib.cargoDoc (
+            common
+            // {
+              inherit cargoArtifacts;
+              cargoDocExtraArgs = "--workspace --no-deps";
+              RUSTDOCFLAGS = "-D warnings";
+            }
+          );
+
+          asciidoc = pkgs.runCommand "asciidoc-check" { nativeBuildInputs = [ pkgs.asciidoctor ]; } ''
+            cd ${docsSrc}
+            find . -name '*.adoc' -print0 \
+              | xargs -0 -n1 asciidoctor --failure-level WARN -o /dev/null
+            touch $out
+          '';
+
+          # Bans, licences and sources only: advisories need the network,
+          # which the sandbox lacks (ADR 0003). The scheduled workflow runs
+          # advisories.
+          deny = craneLib.cargoDeny {
+            inherit (common) src pname version;
+            cargoDenyChecks = "bans licenses sources";
+          };
+
+          # ADR 0002: engine crates are also rejected by prefix in the lockfile.
+          lockfile-prefix = pkgs.runCommand "lockfile-prefix-check" { } ''
+            if grep -E '^name = "(bevy|godot|gdnative|fyrox|rg3d|three-d|rend3)([-_][a-z0-9_-]*)?"$' ${./Cargo.lock}; then
+              echo "banned engine crate in Cargo.lock"
+              exit 1
+            fi
+            touch $out
+          '';
+        }
+        // lib.optionalAttrs (system == "x86_64-linux") {
+          wasm32 = craneLib.cargoBuild (
+            wasmArgs
+            // {
+              pnameSuffix = "-wasm32";
+              cargoArtifacts = craneLib.buildDepsOnly wasmArgs;
+              cargoExtraArgs = "--workspace --locked";
+            }
+          );
+        }
+      );
 
       devShells = forAllSystems (
         { pkgs, ... }:
         let
           inherit (pkgs) lib stdenv;
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          runtimeLibs = with pkgs; [
-            vulkan-loader
-            wayland
-            libxkbcommon
-            libx11
-            libxcursor
-            libxi
-            libxrandr
-          ];
+          runtimeLibs = runtimeLibsFor pkgs;
         in
         {
           default = pkgs.mkShell (
@@ -59,6 +234,7 @@
               packages = [
                 rustToolchain
                 pkgs.sccache
+                pkgs.cargo-deny
               ]
               ++ lib.optionals stdenv.hostPlatform.isLinux [ pkgs.mold ];
 

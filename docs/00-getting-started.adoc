@@ -3,4 +3,54 @@
 
 Scope: how to obtain the repository, set up the toolchain and run the project for the first time.
 
-Status: not yet written (planned for Phase 0)
+== Run the game with Nix
+
+With Nix and flakes enabled, from the repository root:
+
+[source,sh]
+----
+nix run
+----
+
+This builds the `spacetime-quasar` binary with crane and opens a window.
+The package wraps the Vulkan loader, Wayland, `libxkbcommon` and the X11 libraries into the binary's `RUNPATH`, so no `nix develop` and no `LD_LIBRARY_PATH` are needed.
+The GPU driver comes from the host system (on NixOS, `hardware.graphics`).
+Escape closes the window.
+
+Useful variants:
+
+[source,sh]
+----
+nix run . -- --exit-after-ms 3000   # exit with status 0 after 3 seconds
+nix build && ./result/bin/spacetime-quasar
+----
+
+Running the package on a Linux host that is not NixOS is out of scope for now (xref:adr/0001-toolchain-msrv-nix.adoc[ADR 0001]).
+
+== Development shell and checks
+
+[source,sh]
+----
+nix develop      # pinned Rust 1.99.0, sccache, cargo-deny, and mold on Linux
+cargo run -p spacetime-quasar
+nix fmt          # format Nix files
+nix flake check  # fmt, nixfmt, clippy, test, bench build, doc, asciidoc, deny, wasm32
+----
+
+The dev shell exports `LD_LIBRARY_PATH` with the same runtime libraries, so `cargo run` works inside it.
+`nix flake check` runs the CI gates that can run under Nix (xref:adr/0003-ci-design.adoc[ADR 0003]).
+The `deny` check covers bans, licences and sources; the advisories check needs the network and runs weekly in CI.
+
+== Without Nix
+
+Install `rustup`; the pinned toolchain in `rust-toolchain.toml` is installed with `rustup toolchain install`.
+Then:
+
+[source,sh]
+----
+cargo build --workspace --locked
+cargo run -p spacetime-quasar
+----
+
+You must provide the Vulkan loader and, on Linux, the Wayland or X11 client libraries yourself.
+The non-Nix path is exercised by the CI cargo jobs but has not been verified on the reference dev machine, which has no global Rust toolchain.
