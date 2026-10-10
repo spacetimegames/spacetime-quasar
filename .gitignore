@@ -1,0 +1,10 @@
+# Private, owner-local files: never committed (the agent charter is private).
+PROMPT.md
+PROMPT.nix
+flake.nix.example
+
+# Build output.
+/target/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
