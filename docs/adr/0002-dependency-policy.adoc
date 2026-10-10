@@ -5,7 +5,9 @@ toc::[]
 
 == Status
 
-Accepted
+Accepted. The wgpu timing (register row and the alternative "Add wgpu to
+`Cargo.toml` in Phase 0") is amended by
+xref:0005-phase0-window-presentation.adoc[ADR 0005]: wgpu enters in Phase 0.
 
 == Date
 
@@ -323,9 +325,9 @@ PR that changes the dependency. The decisions above are not edited in place.
 
 | `wgpu`
 | `30` (30.0.1 at admission)
-| Phase 2
-| Approved now, added to `Cargo.toml` only when the renderer crate first
-  uses it (no unused dependencies in Phase 0 and 1). Licence tree verified
+| Phase 0 (ADR 0005)
+| Used by `st-render` to clear and present the Phase 0 window, which Wayland
+  does not map until a buffer is presented (ADR 0005). Licence tree verified
   together with winit. Backend features are chosen by the Phase 2 ADR on the
   Windows default backend.
 |===
