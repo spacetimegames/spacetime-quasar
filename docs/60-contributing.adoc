@@ -1,6 +1,81 @@
 = Contributing
-:description: Git flow, definition of done and verification tags.
+:description: Git flow, definition of done, verification tags, PR conventions and docs rules.
 
-Scope: the git flow, the definition of done, and the verification tags.
+Rules for every change to _Spacetime: Quasar_.
+Design questions are answered by the product owner or by an ADR; never invent an answer.
+Decisions of record (xref:decisions/index.adoc[product decisions]) and xref:adr/index.adoc[ADRs] are not re-litigated in code: propose a superseding ADR instead.
 
-Status: not yet written (planned for Phase 0)
+== Git flow
+
+* `main` is protected. Changes go only through a pull request with required green CI checks.
+* A Reviewer's approval is recorded as a PR comment.
+* One branch per Subtask, named `SPAC-<n>-<slug>`, in its own git worktree outside the repository.
+  Build resources are shared as described in xref:adr/0004-build-resources.adoc[ADR 0004].
+* Commit messages and PR titles start with `SPAC-<n>: `.
+* The PR body lists the commands run, their results and their verification levels.
+* PRs are squash-merged; then the branch is deleted and the worktree removed.
+
+== Quality gates
+
+These gates are required on every PR:
+
+[source,sh]
+----
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+----
+
+These three commands were run by an agent inside `nix develop` on the reference dev machine and passed (no tag).
+`cargo deny check` and the MSRV job are also required, but are not wired up yet and have not been run.
+From Phase 1 the cross-platform determinism hash is added.
+From Phase 2, renderer checks run on lavapipe with golden images; updating a golden needs Reviewer approval.
+
+CI enforcement is defined by xref:adr/0003-ci-design.adoc[ADR 0003] and is being set up in Phase 0; do not assume it runs today.
+Toolchain and MSRV rules are in xref:adr/0001-toolchain-msrv-nix.adoc[ADR 0001]; dependency rules in xref:adr/0002-dependency-policy.adoc[ADR 0002].
+
+== Definition of Done
+
+A Subtask is done when:
+
+. The acceptance criteria are met and verified by the Subtask's test command.
+. `fmt`, `clippy` and tests pass locally, and CI is green on all targets.
+. Docs are updated: rustdoc, `docs/` pages, an ADR if a decision was made, and `docs/handoff/state.adoc` if status changed.
+. The Reviewer's "approve" verdict is recorded on the PR.
+. The PR is squash-merged into `main`, and the branch and worktree are removed.
+. The issue gets a comment with the PR link, CI result and Reviewer verdict, and its status moves to Done.
+
+== Verification tags
+
+Every command in `docs/` carries exactly one tag stating how far it was verified:
+
+[cols="1,4",options="header"]
+|===
+| Tag | Meaning
+
+| `[ci-built]` | Compiled in CI.
+| `[ci-tested]` | Compiled and the automated tests passed in CI.
+| `[human]` | Run by a human on that platform's hardware. Record the date and the platform and GPU class, never hostnames or paths.
+| (none) | Run by an agent on the reference dev machine, with output captured.
+|===
+
+Never claim a higher level than was achieved.
+Docs describe only commands that have actually been run at the stated level.
+
+== Docs rules
+
+* All repository docs are AsciiDoc (`.adoc`).
+  Markdown is used only where a tool requires it: `AGENTS.md`, rustdoc, and a crate `README.md` at crates.io publication.
+* Every crate has a `//!` doc covering purpose, boundary, non-goals and a compiling example.
+* Every public item has rustdoc; doc tests are mandatory for public APIs.
+* Non-obvious algorithms get a "why" comment.
+* Every ADR records context, decision, alternatives and consequences, and is written before the change it governs.
+  Start from xref:adr/0000-template.adoc[the template] and add a row to the ADR index.
+* `docs/handoff/state.adoc` stays current.
+
+== Public repository hygiene
+
+Never commit usernames, home paths, hostnames, mount points, network details, issue-tracker site identifiers or personal remarks.
+GPU/CPU model and OS family are fine in benchmark and verification records.
+Use repository-relative paths or `<workspace-root>`.
+Jira keys of the form `SPAC-n` are fine.
