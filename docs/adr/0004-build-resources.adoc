@@ -1,0 +1,212 @@
+= ADR 0004: Local build resources for parallel Builders
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted
+
+== Date
+
+2026-10-10
+
+== Context
+
+Several agent Builders work in parallel on the development machine, each in
+its own git worktree. The charter binds this decision:
+
+* One Rust build saturates the machine's 16 threads; at most 2 to 3 Builders
+  compile in parallel.
+* The main checkout uses `<repo>/target`. Each Builder worktree sets its own
+  `CARGO_TARGET_DIR` beside the repository, because a shared target directory
+  serialises builds on cargo's lock.
+* One shared `sccache` directory; link with `mold`.
+* Worktrees live beside the repository, never inside it.
+* The flake dev shell carries `mold` and `sccache`
+  (xref:0001-toolchain-msrv-nix.adoc[ADR 0001]); a plain `cargo build`
+  without Nix must keep working, on every platform.
+* The machine has a nearly full secondary datasets disk that builds must never
+  use.
+
+In this ADR `<workspace-root>` is the directory that contains the repository
+checkout. `<repo>` is the checkout itself, `<workspace-root>/spacetime-quasar`.
+
+=== Facts verified on 2026-10-10
+
+* nixpkgs unstable: `mold` 2.42.1, `sccache` 0.18.0.
+* Since Rust 1.90, `x86_64-unknown-linux-gnu` links with the bundled LLD by
+  default; the documented opt-out is `-C linker-features=-lld`. A 1.99.0
+  binary linked without extra flags shows `Linker: LLD 23.1.1` in its
+  `.comment` section.
+* In a scratch project inside the flake dev shell (Rust 1.99.0 from
+  rust-overlay, the stdenv `cc` being GCC 16.2.0),
+  `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C linker-features=-lld -C link-arg=-fuse-ld=mold"`
+  produced a binary whose `.comment` shows `mold 2.42.1`.
+* In the same project, that environment variable was joined with
+  `[target.x86_64-unknown-linux-gnu] rustflags` from `.cargo/config.toml`
+  (both `--cfg` values were active). The Cargo reference documents that the
+  `RUSTFLAGS` environment variable is used instead of all config-file
+  rustflags, not joined with them. *Correction to the owner's flake example:*
+  exporting `RUSTFLAGS` for mold would silently drop any rustflags the
+  repository sets in `.cargo/config.toml`.
+* sccache local storage defaults to `~/.cache/sccache` on Linux with a 10 GB
+  size limit (`SCCACHE_CACHE_SIZE` changes it). Local storage supports one
+  sccache server at a time; concurrent servers on one directory race.
+  Incrementally compiled crates (workspace members in the dev profile) are
+  not cached.
+* `RUSTC_WRAPPER=sccache` in the dev shell routed rustc calls through a
+  local sccache server, as `sccache --show-stats` reported.
+
+== Decision
+
+=== Directory layout
+
+[source]
+----
+<workspace-root>/
+├── spacetime-quasar/          main checkout; target dir: spacetime-quasar/target
+├── wt-<JIRA-KEY>-<slug>/      one git worktree per Builder task
+├── target-slot-1/             CARGO_TARGET_DIR of Builder slot 1
+├── target-slot-2/             CARGO_TARGET_DIR of Builder slot 2
+└── target-slot-3/             CARGO_TARGET_DIR of Builder slot 3
+----
+
+* Worktrees are created with
+  `git worktree add <workspace-root>/wt-<JIRA-KEY>-<slug> -b <branch> main`
+  and removed with `git worktree remove` after the PR merges or is abandoned.
+* Every path above, the sccache directory and `TMPDIR` are on the system disk
+  that holds the checkout. Nothing is placed on the secondary datasets disk,
+  and no path is redirected to it through symlinks.
+
+=== Builder slots and `CARGO_TARGET_DIR`
+
+* There are exactly three Builder slots. When the Orchestrator starts a
+  Builder that will compile, it assigns a free slot `n`, and the Builder
+  exports `CARGO_TARGET_DIR=<workspace-root>/target-slot-<n>` before entering
+  the dev shell. The slot is released when the Builder finishes.
+* A slot is therefore both the private target directory and the concurrency
+  token: no more than three compiling Builders, by construction. By default
+  the Orchestrator runs two; it hands out slot 3 only for short work
+  (small crates, documentation, checks only), not for two full workspace test
+  builds plus a third.
+* The target directory belongs to the slot, not to the worktree, so the next
+  task in that slot starts with compiled dependencies. Disk use is bounded to
+  four target directories (main checkout plus three slots).
+* Agents that do not compile (Architect, reviewers running asciidoctor) need
+  no slot. A local `nix flake check` is a build and needs a slot.
+* `CARGO_TARGET_DIR` is never set in a committed file: `.cargo/config.toml`
+  must not contain `build.target-dir`.
+* Housekeeping: when a slot directory grows past about 40 GB, the Builder
+  holding the slot deletes it; dependencies come back quickly from sccache.
+
+=== sccache
+
+* The flake dev shell sets `RUSTC_WRAPPER=sccache` and
+  `SCCACHE_CACHE_SIZE=20G` on Linux and macOS. `SCCACHE_DIR` is not
+  overridden: the default per-user cache directory is the one shared
+  directory, used by the main checkout and every slot. It must be on the
+  system disk.
+* Every Builder therefore talks to the same single sccache server (default
+  port), as sccache's local storage requires. No Builder starts a server with
+  a different `SCCACHE_DIR` or cache size.
+* sccache serves the dependency crates that every slot compiles; workspace
+  crates are incremental in the dev profile and are reused through the slot
+  target directory instead. Incremental compilation stays on.
+* Not in `.cargo/config.toml` (`build.rustc-wrapper`): a machine without
+  sccache would fail every build. CI does not use sccache
+  (xref:0003-ci-design.adoc[ADR 0003]).
+
+=== mold
+
+* On Linux only, the flake dev shell sets
++
+[source,sh]
+----
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C linker-features=-lld -C link-arg=-fuse-ld=mold"
+----
++
+with `mold` in the shell's packages. The stdenv `cc` driver is kept as the
+linker driver. `-C linker-features=-lld` turns off the bundled LLD
+explicitly, so the driver is the only one choosing the linker.
+* The variable is target-specific: wasm builds and cross `cargo check`
+  for other targets are unaffected, and it is joined with, not substituted
+  for, any `[target.x86_64-unknown-linux-gnu] rustflags` in the repository.
+* Never through `RUSTFLAGS` (it would drop config-file rustflags) and never
+  in `.cargo/config.toml` (non-Nix Linux machines without mold would fail to
+  link). Without the dev shell, Linux builds use Rust's default LLD; Windows
+  uses the MSVC linker and macOS the Apple linker, unchanged.
+
+=== What the committed `.cargo/config.toml` may contain
+
+Only settings that are correct on every machine and in CI, such as
+target-specific `cfg` flags needed for wasm. It must not set the target
+directory, a rustc wrapper, a linker or linker flags, `jobs`, or any
+host-dependent code generation flag such as `-C target-cpu=native`, which
+would also endanger cross-platform determinism (PD-06).
+
+=== Parallelism inside one build
+
+No `CARGO_BUILD_JOBS` cap: one build may use all 16 threads. The limit is on
+concurrent Builders (slots), not on each build's jobs.
+
+=== Example Builder session
+
+[source,sh]
+----
+git -C <workspace-root>/spacetime-quasar worktree add \
+    <workspace-root>/wt-SPAC-123-short-slug -b SPAC-123-short-slug main
+cd <workspace-root>/wt-SPAC-123-short-slug
+export CARGO_TARGET_DIR=<workspace-root>/target-slot-2
+nix develop    # adds RUSTC_WRAPPER=sccache, SCCACHE_CACHE_SIZE and, on Linux, the mold flags
+cargo test --workspace --locked
+----
+
+== Alternatives considered
+
+One shared target directory for all worktrees::
+  Builds serialise on cargo's target-directory lock, and branches thrash each
+  other's artefacts. Rejected by the charter.
+Default `target/` inside each worktree::
+  Each new worktree starts cold and the directory is deleted with the
+  worktree; disk use grows with the number of worktrees.
+One `CARGO_TARGET_DIR` per worktree beside the repository::
+  Isolated, but cold on every task and unbounded on disk. Slots keep the
+  isolation, add reuse and enforce the parallelism cap.
+mold and sccache in `.cargo/config.toml`::
+  Breaks plain `cargo build` on machines without them and on macOS and
+  Windows.
+mold through `RUSTFLAGS` (as in the owner's flake example)::
+  Replaces config-file rustflags instead of joining them.
+`mold -run cargo ...`::
+  Works through `LD_PRELOAD` interception; more fragile than a flag and easy
+  to forget.
+Keep Rust's default LLD and drop mold::
+  LLD is already fast, but the charter chose mold; the cost of keeping it is
+  one environment variable.
+Cap each build's `jobs` (for example 6 each for three Builders)::
+  Wastes the machine when only one Builder is compiling, which is the common
+  case.
+
+== Consequences
+
+* Builders need two inputs from the Orchestrator: a worktree path and a slot
+  number.
+* At most four Rust target directories exist at any time; one sccache
+  directory serves all of them.
+* The flake Builder implements the dev-shell variables exactly as written
+  here (Linux-only mold variable, `RUSTC_WRAPPER`, `SCCACHE_CACHE_SIZE`).
+* The committed `.cargo/config.toml` stays portable; CI exercises the plain
+  path.
+* Revisit if the machine's core count or memory changes, if slot directories
+  outgrow the system disk, or if the Rust default linker makes mold
+  redundant enough to drop.
+
+== References
+
+* Rust 1.90.0 announcement (LLD default on x86_64 Linux): https://blog.rust-lang.org/2025/09/18/Rust-1.90.0/
+* Cargo configuration, rustflags precedence: https://doc.rust-lang.org/cargo/reference/config.html
+* sccache local storage: https://github.com/mozilla/sccache/blob/main/docs/Local.md
+* mold: https://github.com/rui314/mold
+* xref:0001-toolchain-msrv-nix.adoc[ADR 0001], xref:0003-ci-design.adoc[ADR 0003]
+* Jira: SPAC-89, SPAC-95

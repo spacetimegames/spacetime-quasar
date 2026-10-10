@@ -22,4 +22,9 @@ in the same commit.
 | Continuous integration design
 | Accepted
 | 2026-10-10
+
+| xref:0004-build-resources.adoc[0004]
+| Local build resources for parallel Builders
+| Accepted
+| 2026-10-10
 |===
