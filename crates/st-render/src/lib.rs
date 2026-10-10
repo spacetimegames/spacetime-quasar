@@ -1,6 +1,6 @@
 //! The wgpu renderer.
 //!
-//! Purpose: The wgpu renderer, internally layered into core, pbr, shadow, post and reflection, with an N-view camera. Rendering is GPU-driven.
+//! Planned scope: The wgpu renderer, internally layered into core, pbr, shadow, post and reflection, with an N-view camera. Rendering will be GPU-driven.
 //!
 //! Boundary: this crate is a stub; it has no public API yet.
 //!

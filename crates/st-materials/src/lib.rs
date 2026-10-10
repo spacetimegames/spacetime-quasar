@@ -1,6 +1,6 @@
 //! Procedural PBR material synthesis.
 //!
-//! Purpose: Procedural PBR material synthesis from descriptors (alloy, paint, glass, ceramic).
+//! Planned scope: Procedural PBR material synthesis from descriptors (alloy, paint, glass, ceramic).
 //!
 //! Boundary: this crate is a stub; it has no public API yet.
 //!

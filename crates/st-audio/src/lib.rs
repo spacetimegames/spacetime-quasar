@@ -1,6 +1,6 @@
 //! Positional audio and procedural sound synthesis.
 //!
-//! Purpose: Positional audio and procedural weapon and engine synthesis. The audio backend is chosen by a later ADR.
+//! Planned scope: Positional audio and procedural weapon and engine synthesis. The audio backend will be chosen by a later ADR.
 //!
 //! Boundary: this crate is a stub; it has no public API yet.
 //!

@@ -1,6 +1,6 @@
 //! Headless game simulation.
 //!
-//! Purpose: The headless simulation: N pilots, the command log, ship dynamics, weapons, damage, AI, economy, factions, missions and design validation.
+//! Planned scope: The headless simulation: N pilots, the command log, ship dynamics, weapons, damage, AI, economy, factions, missions and design validation.
 //!
 //! Boundary: this crate is a stub; it has no public API yet.
 //!

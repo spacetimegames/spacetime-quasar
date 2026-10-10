@@ -1,6 +1,6 @@
 //! Data loading, schema versioning and validation.
 //!
-//! Purpose: Loading of `.ron` data files, schema versioning, hot reload in development builds, and validation that reports actionable errors.
+//! Planned scope: Loading of `.ron` data files, schema versioning, hot reload in development builds, and validation that reports actionable errors.
 //!
 //! Boundary: this crate is a stub; it has no public API yet.
 //!
