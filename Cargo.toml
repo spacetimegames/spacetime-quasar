@@ -17,6 +17,10 @@ members = [
     "apps/spacetime-quasar",
 ]
 
+[workspace.dependencies]
+winit = "0.30"
+wgpu = "30.0.1"
+
 [workspace.package]
 edition = "2024"
 rust-version = "1.88"
