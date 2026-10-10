@@ -37,7 +37,7 @@ It must not require rewriting the simulation.
 
 *Consequences.*
 
-* the agent charter (private) D1 is reworded: "full 3D presentation, planar gameplay by default".
+* The agent charter (private) D1 is reworded: "full 3D presentation, planar gameplay by default".
 * `st-sim` stores 3D state. AI, collision queries and the determinism test run under the planar constraint in the MVP.
 * The combat mode is mostly input and camera work (`st-game`, input mapping); it needs no extra physics.
 * Design note: if B later dominates combat, C becomes a travel and escape mode. Balance this deliberately when B lands.

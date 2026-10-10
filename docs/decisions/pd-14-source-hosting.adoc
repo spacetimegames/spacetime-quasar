@@ -8,5 +8,5 @@
 
 . Code is hosted on *GitHub*.
 . *The game repository is public.*
-. *This repository is the brainstorming/design repository, not the game repository.*
+. *The brainstorming/design repository (private) is separate from the game repository.*
 . *No crate is published to crates.io until its quality has been assessed.* All crates carry `publish = false` until a crate passes an explicit publication review (recorded as an ADR).

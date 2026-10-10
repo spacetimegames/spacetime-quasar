@@ -22,6 +22,6 @@ binding constraints:
 . *Every post effect can be toggled individually* per render profile, so a future VR profile can disable motion blur, chromatic aberration, film grain and problematic screen-space effects.
 . *The cockpit is a section in the xref:pd-03-ship-progression.adoc[PD-03] ship model*, so a procedural interior can be added later without changing the design format.
 
-*Notes.* The product owner has no headset. VR validation hardware is a future
+*Notes.* No VR headset is currently available to the project. VR validation hardware is a future
 procurement decision. On Linux the options are Monado, WiVRn (Quest streaming) and
 SteamVR; macOS has no practical VR path.

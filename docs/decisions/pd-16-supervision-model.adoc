@@ -4,8 +4,8 @@
 * *Date:* 2026-10-10
 * *Amends:* the charter review (private) P2 (human gates)
 
-*Context.* The product owner does not have the expertise to supervise the
-engineering process (code quality, reviews, phase exits). That supervision must be
+*Context.* The product owner owns product and taste. Supervision of the engineering process
+(code quality, reviews, phase exits) is delegated to the Orchestrator and must be
 autonomous.
 
 *Decision.*
@@ -25,7 +25,7 @@ The Orchestrator prepares each such question in plain language, with options and
 
 . *The board is the status report.* At any time, the product owner can read SPAC (or `docs/handoff/state.adoc`) to see where the project stands, without understanding the code.
 
-*Amendment (2026-10-10): hands-on testing.* The product owner does not judge code,
+*Amendment (2026-10-10): hands-on testing.* The product owner is not asked to judge code,
 but is available to *try things* at any stage. Therefore:
 
 * *Every phase exit, and any milestone worth seeing, ships something runnable*: a build started with one command (e.g. `nix run`), plus a plain-language "what to try and what to look for" note.

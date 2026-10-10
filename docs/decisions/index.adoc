@@ -55,12 +55,12 @@ Supporting material: xref:research-gpu-relative-performance-2026-10.adoc[GPU rel
 |PD-09
 |Hardware tiers mapped to reference GPUs
 |2026-10-10
-|xref:pd-09-hardware-tiers-mapped-to-reference.adoc[pd-09-hardware-tiers-mapped-to-reference.adoc]
+|xref:pd-09-hardware-tiers.adoc[pd-09-hardware-tiers.adoc]
 
 |PD-10
 |VR is not supported in the MVP, but the architecture is VR-ready
 |2026-10-10
-|xref:pd-10-vr-is-not-supported-in.adoc[pd-10-vr-is-not-supported-in.adoc]
+|xref:pd-10-vr-post-mvp.adoc[pd-10-vr-post-mvp.adoc]
 
 |PD-11
 |Browser target: deferred past the MVP, WebGPU-only, wasm32 kept green
@@ -110,7 +110,7 @@ Supporting material: xref:research-gpu-relative-performance-2026-10.adoc[GPU rel
 |PD-20
 |Verification resources and the CI / local split
 |2026-10-11
-|xref:pd-20-verification-resources-and-the-ci.adoc[pd-20-verification-resources-and-the-ci.adoc]
+|xref:pd-20-verification-and-ci-split.adoc[pd-20-verification-and-ci-split.adoc]
 
 |PD-21
 |Scope cut: cinematic post effects deferred past the MVP
@@ -125,17 +125,17 @@ Supporting material: xref:research-gpu-relative-performance-2026-10.adoc[GPU rel
 |PD-23
 |The charter is private and pasted, not stored in the game repo
 |2026-10-11
-|xref:pd-23-the-charter-is-private-and.adoc[pd-23-the-charter-is-private-and.adoc]
+|xref:pd-23-private-charter.adoc[pd-23-private-charter.adoc]
 
 |PD-24
 |NixOS is first-class; the flake is a deliverable
 |2026-10-11
-|xref:pd-24-nixos-is-firstclass-the-flake.adoc[pd-24-nixos-is-firstclass-the-flake.adoc]
+|xref:pd-24-nixos-first-class.adoc[pd-24-nixos-first-class.adoc]
 
 |PD-25
 |Game-repo documentation is AsciiDoc
 |2026-10-11
-|xref:pd-25-gamerepo-documentation-is-asciidoc.adoc[pd-25-gamerepo-documentation-is-asciidoc.adoc]
+|xref:pd-25-asciidoc-docs.adoc[pd-25-asciidoc-docs.adoc]
 
 |PD-26
 |Space scale: compressed, with a cruise mode

@@ -41,5 +41,5 @@
 * Real-hardware validation of Low is deferred to the ports/hardening phase (beta testers or borrowed hardware).
 * The dev iGPU (GT1) is used only as a smoke test: startup, tier selection, warning.
 
-*Consequences.* the agent charter (private) D8 and §1 non-negotiable #1 are updated. Iris Xe moves
+*Consequences.* The agent charter (private) D8 and §1 non-negotiable #1 are updated. Iris Xe moves
 from "low tier must remain playable" to best effort.

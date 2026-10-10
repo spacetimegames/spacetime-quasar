@@ -46,7 +46,7 @@ and date inline, then record it in the xref:index.adoc[decision index] and later
 |V2
 |Dev machine iGPU is Intel TigerLake UHD GT1, much weaker than Iris Xe / Radeon 780M.
 |GT1 is the low-tier floor / GT1 unsupported, floor = Iris Xe-class / GT1 as stand-in only
-|DECIDED 2026-10-10 → xref:pd-09-hardware-tiers-mapped-to-reference.adoc[PD-09]
+|DECIDED 2026-10-10 → xref:pd-09-hardware-tiers.adoc[PD-09]
 
 |6
 |Git host
@@ -93,9 +93,9 @@ and date inline, then record it in the xref:index.adoc[decision index] and later
 |12
 |Build host & disk
 |P4, P9
-|The secondary data volume has little free space (~65 GB, 93% used); parallel Builder worktrees multiply `target/` dirs.
-|Shared `CARGO_TARGET_DIR` on the NVMe drive (~610 GB free) + `sccache` + `mold` / move repo to NVMe
-|CLOSED 2026-10-11 — game repo lives on the NVMe drive (private dev-environment notes)
+|Parallel Builder worktrees multiply `target/` dirs on a space-limited volume.
+|Shared `CARGO_TARGET_DIR` on the fastest local drive + `sccache` + `mold` / move repo to a fast local drive
+|CLOSED 2026-10-11 — game repo placed on the fast local drive; build output on fast local storage (never the nearly full secondary volume), per-worktree `target/` dirs and a shared compiler cache
 
 |13
 |Development order
@@ -107,13 +107,13 @@ and date inline, then record it in the xref:index.adoc[decision index] and later
 |14
 |Repository structure
 |xref:pd-14-source-hosting.adoc[PD-14]
-|How many repos, and what goes where: brainstorming/design repo vs game repo; monorepo workspace vs one repo per crate; where the agent charter (the agent charter, private) and decisions live.
-|Proposed: game monorepo (Cargo workspace) + this design repo; crates graduate to own repos only if/when published
+|How many repos, and what goes where: brainstorming/design repo vs game repo; monorepo workspace vs one repo per crate; where the agent charter (private) and decisions live.
+|Proposed: game monorepo (Cargo workspace) + the private design repo; crates graduate to own repos only if/when published
 |DECIDED 2026-10-10 → xref:pd-15-repository-structure.adoc[PD-15] (org `spacetimegames`)
 
 |15
 |Native X11 test session
-|xref:pd-20-verification-resources-and-the-ci.adoc[PD-20]
+|xref:pd-20-verification-and-ci-split.adoc[PD-20]
 |Enabling `services.xserver.desktopManager.xfce.enable` did not yield a usable X11 session (2026-10-11). Needed only for Phase 6 X11 verification.
 |Investigate greeter session list / alternative display manager / `startx`
 |PARKED until Phase 6

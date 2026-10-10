@@ -7,7 +7,7 @@
 *Decision.*
 
 . *Two repositories:*
-** *Design repo* (this one): brainstorming, xref:index.adoc[the decision index], xref:open-points.adoc[the open points], `research/`. *Private.* It becomes the archive of the design phase.
+** *Design repo* (private, source of this record): brainstorming, xref:index.adoc[the decision index], xref:open-points.adoc[the open points], `research/`. *Private.* It becomes the archive of the design phase.
 ** *Game repo `spacetime-quasar`*: *public*, a single Cargo-workspace monorepo. Layout:
 *** `crates/` (st-*), `apps/` (thin binary), `assets/` (`.ron`), `tools/xtask/`, `docs/`, `.github/workflows/`;
 *** root files `flake.nix`, `rust-toolchain.toml`, `deny.toml`, `AGENTS.md`.

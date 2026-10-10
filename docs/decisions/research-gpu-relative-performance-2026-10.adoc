@@ -1,4 +1,4 @@
-= GPU relative performance research (2026-10)
+= GPU relative performance research snapshot (2026-10-10)
 
 Input for quality-tier calibration (open point #5). The metric is the 3DMark Time
 Spy Graphics score at 2560×1440. Desktop rows come from ComputerBase; laptop and
