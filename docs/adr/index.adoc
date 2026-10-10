@@ -27,4 +27,9 @@ in the same commit.
 | Local build resources for parallel Builders
 | Accepted
 | 2026-10-10
+
+| xref:0005-phase0-window-presentation.adoc[0005]
+| Present the Phase 0 window through wgpu
+| Accepted
+| 2026-10-10
 |===

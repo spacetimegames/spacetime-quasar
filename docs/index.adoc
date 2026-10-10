@@ -22,8 +22,8 @@ Pages marked "stub" exist only to fix their scope; each states its own status.
 
 | 3
 | xref:60-contributing.adoc[Contributing]
-| stub
-| Phase 0
+| written
+| n/a
 
 | 4
 | xref:adr/index.adoc[Architecture Decision Records]
@@ -77,7 +77,7 @@ Pages marked "stub" exist only to fix their scope; each states its own status.
 
 == Handoff
 
-Owned by other work items and not linked yet because the files do not exist:
+Start with the project state page. The rest is owned by other work items and not linked yet because the files do not exist:
 
-* `handoff/state.adoc`: current project state (SPAC-28).
+* xref:handoff/state.adoc[Project state]: current status, next steps, known problems and open questions.
 * `handoff/try/`: hands-on notes, one `phase-<n>.adoc` per phase.
