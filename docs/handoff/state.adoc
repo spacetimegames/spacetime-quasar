@@ -35,7 +35,7 @@ It states where the project stands; the linked pages hold the detail.
 
 All of this is on `main`.
 
-* Dev shell: `nix develop` gives the pinned Rust 1.99.0 plus mold and sccache (xref:../adr/0001-toolchain-msrv-nix.adoc[ADR 0001], xref:../adr/0004-build-resources.adoc[ADR 0004]). `nix fmt` works.
+* Dev shell: `nix develop` gives the pinned Rust 1.99.0 plus sccache, and mold on Linux only (xref:../adr/0001-toolchain-msrv-nix.adoc[ADR 0001], xref:../adr/0004-build-resources.adoc[ADR 0004]). `nix fmt` works.
 * Cargo workspace: 12 `st-*` crate stubs, `tools/xtask` and `apps/spacetime-quasar` (a stub binary). It builds and passes fmt, clippy with `-D warnings`, and tests. It also checks on wasm32.
 * CI (GitHub Actions) runs 9 required checks: `fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs` and `nix`. See xref:../adr/0003-ci-design.adoc[ADR 0003].
 * Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0004, the product decision records PD-01 to PD-26, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
@@ -49,9 +49,8 @@ All of this is on `main`.
 
 Remaining Phase 0 work:
 
-. Empty window visible on Wayland that resizes and closes cleanly, started with `nix run`.
-. Flake `packages.default` with runtime library wrapping, and flake `checks`. These come after the window lands. They make `nix run` start the game binary and give `nix flake check` the CI gates.
-. This file (SPAC-28).
+. Empty window visible on Wayland that resizes and closes cleanly (SPAC-96), run from the dev shell.
+. Flake `packages.default` with runtime library wrapping, and flake `checks`, after the window lands. They make `nix run` start the game binary and give `nix flake check` the CI gates.
 . The Phase 0 hands-on test note `docs/handoff/try/phase-0.adoc` and the owner test.
 . The phase-gate review.
 
@@ -72,20 +71,17 @@ Phase 1 (Base crates) needs these ADRs:
 
 == Open owner questions
 
-Due before Phase 2.
+Needed before Phase N means the answer must exist before that phase starts.
 
-[cols="1,3",options="header"]
-|===
-| Id | Topic
-
-| G2 | Controls and devices.
-| G5 | Economy basics.
-| G7 | Combat details, including whether the laser is an instant beam or travelling bolts.
-| G9 | AI traffic basics.
-|===
+* G2, controls (needed before Phase 2): devices and default bindings; target cycling; land/autopilot, hail and board keys.
+* G7, combat (needed before Phase 2): laser model (instant beam with overheat vs travelling bolts, undecided); lead indicator; shield regeneration; what armour regions do; disable-and-board vs destroy; player death; escorts.
+* G5, economy (basic needed before Phase 2, full needed before Phase 3): price formula, production and consumption, player impact, cargo units, starting credits and ship, commodity list, illegal goods.
+* G9, traffic (basic needed before Phase 2): AI archetypes and traffic density per system.
+* Later, needed before Phase 3: G4 navigation and jumps, G6 factions and law, G8 missions, G11 saves and sessions. Needed before Phase 5: G14 audio direction.
+* Licence: deferred by the owner. All rights reserved meanwhile. To be decided at the first crate publication review or the MVP release, whichever comes first (open point #7).
+* Open point #15, the native X11 test session, is parked until Phase 6.
 
 G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
-See xref:../decisions/open-points.adoc[the open points] for the full list.
 
 == Where to start
 

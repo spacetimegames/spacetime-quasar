@@ -18,7 +18,7 @@ The project is unrelated to SpacetimeDB.
 
 == Status
 
-Phase 0 (bootstrap). Nothing is playable yet, and there is no game binary to build.
+Phase 0 (bootstrap). Nothing is playable yet; a stub binary exists that does nothing yet.
 
 What works today:
 
