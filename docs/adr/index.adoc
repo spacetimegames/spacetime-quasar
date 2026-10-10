@@ -12,4 +12,9 @@ in the same commit.
 | Rust toolchain, MSRV and Nix flake foundations
 | Accepted
 | 2026-10-10
+
+| xref:0002-dependency-policy.adoc[0002]
+| Dependency policy, licences, bans and advisories
+| Accepted
+| 2026-10-10
 |===

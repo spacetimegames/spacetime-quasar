@@ -1,0 +1,389 @@
+= ADR 0002: Dependency policy, licences, bans and advisories
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted
+
+== Date
+
+2026-10-10
+
+== Context
+
+The charter binds this decision:
+
+* The project licence is deferred; meanwhile all rights are reserved, there is
+  no licence file and every crate is `publish = false`.
+  The candidate licences are `MIT OR Apache-2.0`, `MPL-2.0` and `GPL-3.0`.
+* `deny.toml` allows only permissive dependency licences that stay compatible
+  with any candidate project licence.
+* `cargo deny check` runs on every PR: licence allow-list, advisories and
+  bans, including the engine crates banned by D4 (Bevy, Godot, Unreal,
+  `three-d`, `rg3d`/Fyrox; `rend3` is unmaintained).
+* New dependencies need Architect sign-off; non-trivial ones need an ADR.
+* Preferred mature crates: Rapier, Parry, wgpu, winit, bytemuck, image,
+  serde with ron. wgpu is fixed at 30.x.
+* Phase 0 delivers an empty window; the renderer arrives in Phase 2.
+
+=== Facts verified on 2026-10-10
+
+* crates.io: `winit` latest stable is 0.30.13 (2026-03-02, Apache-2.0,
+  `rust-version` 1.70.0); 0.31 is still at `0.31.0-beta.3`.
+  `wgpu` 30.0.1 (2026-08-22, `MIT OR Apache-2.0`, `rust-version` 1.87.0).
+* A scratch crate depending on `winit 0.30.13` and `wgpu 30.0.1`, resolved
+  and checked with `cargo-deny` 0.20.2 against the four project targets plus
+  `wasm32-wasip1`, contains these licence expressions: Apache-2.0,
+  `Apache-2.0 WITH LLVM-exception` (rustix, linux-raw-sys, wit-bindgen),
+  BSD-2-Clause (zerocopy, arrayref), BSD-3-Clause (num_enum, tiny-skia),
+  ISC (libloading), MIT, Unicode-3.0 (unicode-ident), Zlib (bytemuck,
+  foldhash, slotmap, raw-window-handle, objc2-* and others; foldhash and
+  slotmap are Zlib only), Unlicense (only as `Unlicense OR MIT`) and
+  LGPL-2.1-or-later (only in r-efi's `MIT OR Apache-2.0 OR LGPL-2.1-or-later`).
+  With the `deny.toml` below, `cargo deny check` reports
+  `advisories ok, bans ok, licenses ok, sources ok`, with duplicate-version
+  warnings only (bitflags, objc2, windows-sys, syn, thiserror and others).
+* cargo-deny `bans.deny` matches exact crate names: a test entry `wgpu-hal*`
+  did not match `wgpu-hal`, while `wgpu-hal` did. *Correction:* a `bevy*`
+  glob, as worded in the assignment, cannot be written in `deny.toml`; the
+  ban list below enumerates names and a lockfile prefix check covers the
+  rest.
+* `[licenses.private] ignore = true` makes cargo-deny skip `publish = false`
+  crates, so the unlicensed workspace crates do not fail the licence check
+  (verified with the scratch crate).
+
+== Decision
+
+=== Licence allow-list
+
+Allowed SPDX identifiers, usable verbatim in `deny.toml`:
+
+[cols="2,5",options="header"]
+|===
+| Licence | Decision and reason
+
+| `MIT`, `MIT-0`
+| Allow. Permissive; inbound-compatible with all three candidates.
+
+| `Apache-2.0`, `Apache-2.0 WITH LLVM-exception`
+| Allow. Permissive with a patent grant; compatible with `GPL-3.0` (not with
+  GPL-2.0, which is not a candidate) and with `MPL-2.0`. The LLVM exception
+  only relaxes terms.
+
+| `BSD-2-Clause`, `BSD-3-Clause`
+| Allow. Permissive; compatible with all candidates.
+
+| `ISC`
+| Allow. Functionally MIT; FSF lists it as GPL-compatible. Needed now
+  (libloading).
+
+| `Zlib`
+| Allow. Permissive, GPL-compatible, no notice needed in binaries. Needed
+  now: foldhash and slotmap have no other licence option.
+
+| `BSL-1.0`
+| Allow. Permissive, GPL-compatible, no notice needed in binaries. Not in the
+  tree today, but common in the ecosystem (ryu, xxhash-rust, clipboard-win).
+
+| `Unicode-3.0`
+| Allow. The Unicode data licence is permissive and GPL-compatible; it
+  reaches every Rust build through `unicode-ident` (proc-macro2), so denying
+  it is not workable.
+
+| `CC0-1.0`
+| Allow. A public-domain dedication with a permissive fallback; FSF lists it
+  as GPL-compatible. It grants no patent licence, so a CC0-only crate that
+  implements a substantial algorithm gets an explicit look at admission.
+|===
+
+Not allowed, with reasons:
+
+* `MPL-2.0`: weak, file-level copyleft, so not permissive. It would be
+  compatible with every candidate, but the charter asks for permissive only.
+  An MPL-2.0 crate can enter only through a per-crate
+  `[[licenses.exceptions]]` entry backed by an ADR, which must confirm that
+  the crate is used unmodified and is not marked "Incompatible With Secondary
+  Licenses" (that marking would rule out `GPL-3.0`). Prefer a permissive
+  alternative first.
+* `Unlicense`, `WTFPL`, `0BSD` and other public-domain-style licences: not
+  needed (Unlicense only appears as an alternative to MIT), and of uncertain
+  effect in some jurisdictions. Admission would need an ADR amendment.
+* All GPL, LGPL, AGPL, SSPL, BUSL, CDDL, EPL, OpenSSL and non-SPDX or unknown
+  licences: denied by omission. A dual-licensed crate passes when one of its
+  options is on the list (cargo-deny evaluates the SPDX expression).
+* Workspace crates are ignored by the licence check
+  (`[licenses.private] ignore = true`) because they have no licence while
+  the project licence is deferred.
+
+Binary distribution obligations (attribution notices for MIT, BSD, Apache,
+ISC and Unicode code) are a release-packaging task; a notices generator is
+chosen by ADR before the first public build.
+
+=== Bans
+
+* Engine crates per D4, denied by exact name:
+** Bevy: `bevy`, `bevy_internal`, `bevy_app`, `bevy_ecs`, `bevy_render`,
+   `bevy_pbr`, `bevy_core_pipeline`, `bevy_asset`, `bevy_window`,
+   `bevy_winit`, `bevy_ui`, `bevy_sprite`, `bevy_scene`, `bevy_gizmos`,
+   `bevy_reflect`, `bevy_math`, `bevy_tasks`, `bevy_utils`, `bevy_platform`,
+   `bevy_transform`, `bevy_input`, `bevy_time`.
+** Godot bindings: `godot`, `godot-core`, `godot-ffi`, `godot-macros`,
+   `gdnative`, `gdnative-core`, `gdnative-sys`.
+** Fyrox and its former name: `fyrox`, `fyrox-impl`, `fyrox-core`,
+   `fyrox-ui`, `fyrox-graphics`, `fyrox-resource`, `fyrox-sound`, `rg3d`,
+   `rg3d-core`, `rg3d-ui`, `rg3d-sound`.
+** `three-d`, `three-d-asset`.
+** `rend3`, `rend3-routine`, `rend3-types` (unmaintained).
+** Unreal has no maintained crates.io bindings; any that appear are banned
+   by this policy and added to the list when found.
+* Because cargo-deny has no name globs, the `deny` CI job also fails if
+  `Cargo.lock` contains any package whose name starts with one of these
+  prefixes:
++
+[source,sh]
+----
+! grep -E '^name = "(bevy|godot|gdnative|fyrox|rg3d|three-d|rend3)([-_][a-z0-9_-]*)?"$' Cargo.lock
+----
+* `multiple-versions = "warn"`: the winit and wgpu trees already carry
+  duplicates (verified), so `deny` would block Phase 2. The warnings stay
+  visible in CI logs.
+* `wildcards = "deny"` with `allow-wildcard-paths = true`: version
+  requirements must be explicit; path dependencies between private
+  workspace crates are allowed.
+* Sources: crates.io only. Git and other registries are denied; an exception
+  needs an ADR.
+
+=== Advisories
+
+* Any RustSec vulnerability advisory fails the check.
+* `unsound = "all"`: unsoundness advisories fail, direct or transitive.
+* `unmaintained = "workspace"`: unmaintained direct dependencies fail;
+  transitive ones do not, because the fix is usually out of our hands.
+* `yanked = "deny"`: a yanked version in `Cargo.lock` fails.
+* An advisory may be ignored only through an `ignore` entry with
+  `reason`, which names why the code path is unaffected and the Jira key
+  that tracks removal. Each entry needs Architect sign-off and is
+  re-examined at every lockfile update.
+* The advisory database changes without code changes, so a scheduled weekly
+  run of `cargo deny check advisories` on `main` warns early
+  (xref:0003-ci-design.adoc[ADR 0003]); it is not a required check.
+
+=== `deny.toml`
+
+[source,toml]
+----
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown",
+    "wasm32-wasip1",
+]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "workspace"
+unsound = "all"
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+exceptions = []
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # D4. Exact names only (no globs); the CI deny job adds a Cargo.lock prefix check.
+    { crate = "bevy", reason = "D4: game engine" },
+    { crate = "bevy_internal", reason = "D4: game engine" },
+    { crate = "bevy_app", reason = "D4: game engine" },
+    { crate = "bevy_ecs", reason = "D4: game engine" },
+    { crate = "bevy_render", reason = "D4: game engine" },
+    { crate = "bevy_pbr", reason = "D4: game engine" },
+    { crate = "bevy_core_pipeline", reason = "D4: game engine" },
+    { crate = "bevy_asset", reason = "D4: game engine" },
+    { crate = "bevy_window", reason = "D4: game engine" },
+    { crate = "bevy_winit", reason = "D4: game engine" },
+    { crate = "bevy_ui", reason = "D4: game engine" },
+    { crate = "bevy_sprite", reason = "D4: game engine" },
+    { crate = "bevy_scene", reason = "D4: game engine" },
+    { crate = "bevy_gizmos", reason = "D4: game engine" },
+    { crate = "bevy_reflect", reason = "D4: game engine" },
+    { crate = "bevy_math", reason = "D4: game engine" },
+    { crate = "bevy_tasks", reason = "D4: game engine" },
+    { crate = "bevy_utils", reason = "D4: game engine" },
+    { crate = "bevy_platform", reason = "D4: game engine" },
+    { crate = "bevy_transform", reason = "D4: game engine" },
+    { crate = "bevy_input", reason = "D4: game engine" },
+    { crate = "bevy_time", reason = "D4: game engine" },
+    { crate = "godot", reason = "D4: game engine" },
+    { crate = "godot-core", reason = "D4: game engine" },
+    { crate = "godot-ffi", reason = "D4: game engine" },
+    { crate = "godot-macros", reason = "D4: game engine" },
+    { crate = "gdnative", reason = "D4: game engine" },
+    { crate = "gdnative-core", reason = "D4: game engine" },
+    { crate = "gdnative-sys", reason = "D4: game engine" },
+    { crate = "fyrox", reason = "D4: game engine" },
+    { crate = "fyrox-impl", reason = "D4: game engine" },
+    { crate = "fyrox-core", reason = "D4: game engine" },
+    { crate = "fyrox-ui", reason = "D4: game engine" },
+    { crate = "fyrox-graphics", reason = "D4: game engine" },
+    { crate = "fyrox-resource", reason = "D4: game engine" },
+    { crate = "fyrox-sound", reason = "D4: game engine" },
+    { crate = "rg3d", reason = "D4: game engine" },
+    { crate = "rg3d-core", reason = "D4: game engine" },
+    { crate = "rg3d-ui", reason = "D4: game engine" },
+    { crate = "rg3d-sound", reason = "D4: game engine" },
+    { crate = "three-d", reason = "D4: game engine" },
+    { crate = "three-d-asset", reason = "D4: game engine" },
+    { crate = "rend3", reason = "D4: unmaintained renderer" },
+    { crate = "rend3-routine", reason = "D4: unmaintained renderer" },
+    { crate = "rend3-types", reason = "D4: unmaintained renderer" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+----
+
+The file above was checked verbatim with cargo-deny 0.20.2 on 2026-10-10
+against the scratch winit plus wgpu tree: all four checks pass.
+
+=== Dependency admission
+
+* Every new direct dependency (normal, build or dev) needs Architect
+  sign-off, recorded as a row in the register below, added in the same PR
+  that adds the dependency.
+* An ADR is needed when the dependency is non-trivial, meaning any of:
+** it shapes the architecture (ECS, physics, rendering, windowing, audio,
+   networking, async runtime, serialisation format, scripting);
+** it is used by simulation code (PD-06 determinism must be argued);
+** it builds or links native code (`build.rs` compiling C or C++, `-sys`
+   crates, system libraries);
+** it adds more than about 15 crates to `Cargo.lock`;
+** it needs a licence exception, an advisory ignore, a git source or a ban
+   exception.
+* Admission checklist, stated in the PR: licence on the allow-list;
+  `cargo deny check` green; builds on all four targets (wasm32 included) or
+  is `cfg`-gated to the platforms it serves; `rust-version` not above the
+  workspace MSRV; maintained (a release in the last 12 months, or
+  demonstrably finished); `default-features = false` with only the features
+  needed; no overlap with an approved crate.
+* Semver-compatible updates of approved crates (`cargo update`) need no
+  sign-off; CI gates them. Semver-major updates need sign-off as a register
+  row change; versions fixed by the charter (wgpu 30.x) change only by ADR.
+* Removing a dependency needs no sign-off; the register row is deleted.
+* Tools that are not crate dependencies (cargo-deny, sccache, mold, wasmtime,
+  asciidoctor) are governed by xref:0001-toolchain-msrv-nix.adoc[ADR 0001],
+  xref:0003-ci-design.adoc[ADR 0003] and
+  xref:0004-build-resources.adoc[ADR 0004], not by this register.
+
+=== Approved dependency register
+
+This table is the living register: rows are added, changed or removed in the
+PR that changes the dependency. The decisions above are not edited in place.
+
+[cols="2,2,2,5",options="header"]
+|===
+| Crate | Requirement | Admitted for | Notes
+
+| `winit`
+| `0.30` (0.30.13 at admission)
+| Phase 0
+| Window and event loop for the empty window. Default features (X11,
+  Wayland with `dlopen`, client-side decorations for compositors that need
+  them). 0.31 is beta and not admitted.
+
+| `wgpu`
+| `30` (30.0.1 at admission)
+| Phase 2
+| Approved now, added to `Cargo.toml` only when the renderer crate first
+  uses it (no unused dependencies in Phase 0 and 1). Licence tree verified
+  together with winit. Backend features are chosen by the Phase 2 ADR on the
+  Windows default backend.
+|===
+
+Named by the charter but not yet admitted (sign-off at introduction):
+`bytemuck` (trivial); `image` (sign-off, decoders limited to the formats
+used); `serde` with `ron` (sign-off; the save and config format gets its own
+ADR); `rapier3d` and `parry3d` (ADR required, because of PD-06 determinism
+features and float behaviour).
+
+== Alternatives considered
+
+Allow only MIT, Apache-2.0 and BSD::
+  Fails today: unicode-ident (Unicode-3.0), foldhash and slotmap (Zlib only)
+  and libloading (ISC) sit in the winit and wgpu trees.
+Allow `MPL-2.0` globally::
+  Compatible with the candidates, but it is copyleft and the charter asks for
+  permissive only; per-crate exceptions keep each case visible.
+Deny `CC0-1.0`::
+  Defensible on patent grounds, but CC0 crates are common small utilities
+  and the FSF treats CC0 as GPL-compatible; review at admission covers the
+  risk.
+`multiple-versions = "deny"`::
+  Blocks the approved winit and wgpu trees outright.
+`unmaintained = "all"`::
+  Fails PRs on transitive crates we cannot replace; the weekly scheduled run
+  still reports advisories.
+Add wgpu to `Cargo.toml` in Phase 0::
+  Adds about 70 crates to `Cargo.lock` (255 entries instead of 184 for winit
+  alone, all platforms, verified 2026-10-10) and long compile times to every Phase 0 and
+  Phase 1 build for no code that uses it.
+Defer the wgpu decision to Phase 2::
+  The charter already fixes wgpu 30.x; approving it now, after a licence
+  check, removes a Phase 2 blocker.
+
+== Consequences
+
+* `deny.toml` can be written from this ADR without further decisions; the
+  current winit and wgpu trees pass it.
+* Allowed licences that do not appear yet do not warn
+  (`unused-allowed-license = "allow"`).
+* A future crate under MPL-2.0 (for example `option-ext` through `dirs`)
+  needs an exception ADR or a permissive alternative.
+* Release packaging must ship third-party notices; that tooling is a later
+  ADR.
+* A new RustSec advisory can turn `main` red without a code change; the
+  weekly run surfaces it, and the fix is an update, a replacement or a
+  reasoned ignore.
+* Revisit the allow-list when the owner picks the project licence: a
+  permissive project licence changes nothing, while `GPL-3.0` would allow
+  relaxing the MPL rule.
+
+== References
+
+* cargo-deny book: https://embarkstudios.github.io/cargo-deny/
+* SPDX licence list: https://spdx.org/licenses/
+* FSF licence list (GPL compatibility): https://www.gnu.org/licenses/license-list.html
+* RustSec advisory database: https://rustsec.org/
+* crates.io: https://crates.io/crates/winit, https://crates.io/crates/wgpu
+* xref:0001-toolchain-msrv-nix.adoc[ADR 0001], xref:0003-ci-design.adoc[ADR 0003]
+* Jira: SPAC-89, SPAC-93
