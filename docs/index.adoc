@@ -80,4 +80,4 @@ Pages marked "stub" exist only to fix their scope; each states its own status.
 Start with the project state page. The rest is owned by other work items and not linked yet because the files do not exist:
 
 * xref:handoff/state.adoc[Project state]: current status, next steps, known problems and open questions.
-* `handoff/try/`: hands-on notes, one `phase-<n>.adoc` per phase.
+* `handoff/try/`: hands-on notes, one `phase-<n>.adoc` per phase. Available now: xref:handoff/try/phase-0.adoc[Try Phase 0].
