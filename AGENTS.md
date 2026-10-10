@@ -90,9 +90,13 @@ Per [ADR 0004](docs/adr/0004-build-resources.adoc):
 
 - Iterate with cargo inside `nix develop`. It is incremental and uses sccache through
   `RUSTC_WRAPPER`. Do not set `SCCACHE_DIR`.
-- Builders use the shared `target-slot-<n>` directories as `CARGO_TARGET_DIR`.
-- `nix build` and `nix flake check` are final checks for flake or packaging changes,
-  not the inner loop.
+- A Builder is assigned one of three slots `n` and exports
+  `CARGO_TARGET_DIR=<workspace-root>/target-slot-<n>`. The slot is both its private
+  target directory and the concurrency token; it is released when the Builder finishes.
+
+Working convention: iterate with cargo in the dev shell; use `nix build` /
+`nix flake check` as a final check when changing the flake or packaging. CI's `nix`
+job runs it on every PR.
 
 ## Definition of Done (Subtask)
 
