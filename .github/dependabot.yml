@@ -1,0 +1,8 @@
+# Keeps the pinned action SHAs current (docs/adr/0003-ci-design.adoc).
+# Cargo dependencies are deliberately not managed here (ADR 0002 admission rules).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
