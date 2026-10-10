@@ -1,0 +1,56 @@
+= Try Phase 0
+:description: A short hands-on checklist for the Phase 0 build: what to try and what to report.
+
+Phase 0 only proves the foundation.
+This page is a checklist you can follow without any engineering knowledge.
+
+== Start it
+
+Open a terminal anywhere and run one command:
+
+[source,sh]
+----
+nix run github:spacetimegames/spacetime-quasar
+----
+
+The first run builds the program from source and takes a few minutes.
+Later runs start in seconds.
+
+If you have the repository checked out, you can run `nix run` from inside that folder instead.
+
+To check that it starts and closes by itself after three seconds, add `-- --exit-after-ms 3000` to either command.
+The terminal prints one line starting with `adapter:` that names your graphics card.
+
+== What you should see
+
+* A window titled "Spacetime Quasar".
+* A dark, empty background.
+* No game content: this phase only proves the foundation.
+
+== What to try
+
+* [ ] Drag the window edge to resize it. Good: it stays dark, with no flicker or garbage, and the terminal shows no errors.
+* [ ] Maximise the window, then restore it. Good: same as above.
+* [ ] Press Escape. Good: the window closes and the terminal returns with no error.
+* [ ] Start it again and close it with the window's close button. Good: same result as Escape.
+* [ ] Optional: use the integrated graphics instead of the main GPU.
++
+[source,sh]
+----
+WGPU_POWER_PREF=low nix run github:spacetimegames/spacetime-quasar -- --exit-after-ms 3000
+----
++
+Good: the terminal line starting `adapter:` names the Intel GPU.
+This is the unsupported low-end tier, so it only needs to start.
+* [ ] Optional: tile the window or move it between workspaces under COSMIC. Good: it keeps drawing the dark background.
+
+== What to report back
+
+For each item above, tell us in plain words either "OK" or what happened.
+Also paste any text the terminal printed, especially anything that looks like an error.
+No technical detail is needed.
+
+== Known limits
+
+* There is no content yet. Nothing is drawn but the background.
+* Platforms other than Linux and NixOS are not tested by hand yet.
