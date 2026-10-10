@@ -3,4 +3,6 @@
 
 Scope: supported setup, known issues and verification status for Linux under Wayland.
 
-Status: not yet written (planned for Phase 0)
+Status: partial; see the verification line below.
+
+Verified: [human] 2026-10-11, NixOS with COSMIC on Wayland, NVIDIA RTX 3080 Laptop GPU class and Intel integrated GPU; the Phase 0 window opens, resizes and closes (see xref:nixos-cosmic.adoc[NixOS with COSMIC]).
