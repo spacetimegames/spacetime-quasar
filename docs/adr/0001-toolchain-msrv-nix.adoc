@@ -63,8 +63,11 @@ needed in the toolchain as well.
 * wgpu 30.0.1 was published on 2026-08-22 with `rust-version = 1.87.0`;
   winit 0.30.13 (2026-03-02) declares 1.70.0.
 * Rust 1.88.0 stabilised let chains, in edition 2024 only.
-* Cargo resolver `3` (the default for `edition = "2024"`) prefers dependency
-  versions whose `rust-version` is compatible with the package's own.
+* Cargo resolver `3` (requires Rust 1.84+) prefers dependency versions whose
+  `rust-version` is compatible with the workspace's own. A package with
+  `edition = "2024"` gets it by default, but a virtual workspace does not
+  take the resolver from any edition: without an explicit `resolver` key in
+  `[workspace]`, cargo falls back to resolver `1` and warns.
 
 == Decision
 
@@ -104,8 +107,13 @@ targets = [
 * The workspace `Cargo.toml` sets `edition = "2024"` and
   `rust-version = "1.88"` under `[workspace.package]`; every member inherits
   both with `edition.workspace = true` and `rust-version.workspace = true`.
-  Resolver `3` comes with edition 2024 and keeps `Cargo.lock` MSRV-compatible
-  where possible.
+* The workspace `Cargo.toml` sets `resolver = "3"` explicitly under
+  `[workspace]`. Setting the edition in `[workspace.package]` does not select
+  a resolver, and a virtual workspace otherwise falls back to resolver `1`.
+  MSRV-aware resolution depends on resolver `3`: it is what makes
+  `cargo update` prefer dependency versions whose `rust-version` is at most
+  1.88, so that `Cargo.lock` stays buildable by the `msrv` job where
+  possible.
 * Why 1.88 rather than the 1.87 floor: let chains (stable in 1.88, edition
   2024) are the most ergonomic language change in that range, and no
   approved dependency needs anything newer.
@@ -173,9 +181,8 @@ a non-NixOS Linux host is out of scope for now.
 The flake exposes `packages`, `devShells`, `checks` and `formatter` only.
 A desktop game client has no service, user or configuration for a NixOS
 module to manage, and `nix run` or `packages.<system>.default` already
-installs it. Revisit when a dedicated server binary appears, or when the
-owner wants to install the game from a system configuration through an
-overlay.
+installs it. Revisit when a dedicated server binary appears, or when the game
+needs to be installed from a NixOS system configuration through an overlay.
 
 == Alternatives considered
 
@@ -183,7 +190,7 @@ overlay.
   Equally capable for stable toolchains, and stronger for nightly and
   nightly rust-analyzer, which the charter bans. A pinned stable needs a
   `sha256` beside `rust-toolchain.toml`, so every bump touches two places.
-  `rust-overlay` reads the file alone and is the owner's existing choice.
+  `rust-overlay` reads the file alone.
 `naersk`::
   Simpler, but less active (last push 2026-06-23) and without per-check
   helpers, so every flake check would be hand-written.

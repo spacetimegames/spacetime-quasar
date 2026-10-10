@@ -21,7 +21,7 @@ The charter binds this decision:
   low-resolution golden images). Performance, VRAM cap, beauty and art-pass
   screenshots and COSMIC runs are local gates on the development machine.
   No self-hosted runner: the repository is public, and a fork PR could run
-  code on the owner's machine.
+  code on the development machine.
 * Quality bars on every PR: `cargo fmt --check`;
   `cargo clippy --workspace --all-targets -- -D warnings`;
   `cargo test --workspace` (unit and doc tests); an MSRV build job;
@@ -93,8 +93,12 @@ The charter binds this decision:
 * Toolchain setup in every Rust job: `rustup toolchain install` (reads
   `rust-toolchain.toml`). No toolchain action that duplicates the version.
 * Every cargo command uses `--locked`. `CARGO_TERM_COLOR=always`.
-* CI cargo jobs run without Nix and without mold or sccache: they prove that
-  the plain `cargo build` path works.
+* No CI job uses mold or sccache. The cargo jobs also run without Nix, which
+  proves that the plain `cargo build` path works. The only job that builds
+  inside the dev shell, `render (lavapipe)`, unsets the dev shell's
+  `RUSTC_WRAPPER` and
+  `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS` (see the lavapipe
+  section).
 * `.github/workflows/scheduled.yml` runs weekly (and on demand) on `main`:
   `cargo deny check advisories`. It is not a required check; a failure is
   triaged per ADR 0002.
@@ -192,7 +196,7 @@ Why the gates are placed this way:
 * The `nix` and `render (lavapipe)` jobs use
   `DeterminateSystems/magic-nix-cache-action` (the Actions cache, no secrets,
   safe for forks). If it stops working, `nix-community/cache-nix-action` is
-  the fallback. A Cachix cache needs an owner account and a secret, so it is
+  the fallback. A Cachix cache needs an account and a repository secret, so it is
   not used.
 
 === Required checks for branch protection
@@ -273,10 +277,18 @@ comes, CI installs `wasm-bindgen-cli` at the exact version in `Cargo.lock`.
 * Golden-image tests run in the `render (lavapipe)` job: Nix provides mesa's
   lavapipe and the Vulkan loader from `flake.lock`, so the rasteriser version
   is pinned and identical locally and in CI. The job runs
-  `nix develop -c cargo test -p <renderer crate> --features gpu-tests` with
+  `nix develop -c env -u RUSTC_WRAPPER -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS cargo test -p <renderer crate> --features gpu-tests`
+  with
   `VK_ICD_FILENAMES` pointing at mesa's lavapipe ICD file and wgpu forced to
   the Vulkan backend. On failure it uploads actual, expected and diff images
   as an artifact.
+* Why the job unsets the sccache wrapper and the mold flags that the dev
+  shell sets (ADR 0004): CI has no persistent sccache storage, so the wrapper
+  would only add a server process and a cold cache on every run; caching in
+  CI is rust-cache's job. Dropping the mold flags keeps this job on the same
+  default linker as the other CI cargo jobs, so a linker difference can never
+  explain a CI-only failure. Mesa and the Vulkan loader, the reason for using
+  the dev shell here, are unaffected.
 * The same tests are a flake check (`render-lavapipe`) for local runs.
 * Images are low resolution (for example 256 by 144) and compared with a
   per-pixel tolerance and a maximum count of differing pixels. A `flake.lock`
@@ -383,7 +395,7 @@ Running every check only through Nix in CI::
   Would no longer prove that a plain `cargo build` works, and cannot cover
   Windows or macOS.
 A self-hosted runner with a real GPU::
-  Banned: fork PRs could run code on the owner's machine.
+  Banned: fork PRs could run code on the development machine.
 
 == Consequences
 

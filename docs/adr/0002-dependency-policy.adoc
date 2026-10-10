@@ -46,8 +46,8 @@ The charter binds this decision:
   `advisories ok, bans ok, licenses ok, sources ok`, with duplicate-version
   warnings only (bitflags, objc2, windows-sys, syn, thiserror and others).
 * cargo-deny `bans.deny` matches exact crate names: a test entry `wgpu-hal*`
-  did not match `wgpu-hal`, while `wgpu-hal` did. *Correction:* a `bevy*`
-  glob, as worded in the assignment, cannot be written in `deny.toml`; the
+  did not match `wgpu-hal`, while `wgpu-hal` did. *Consequence:* a `bevy*`
+  glob cannot be written in `deny.toml`; the
   ban list below enumerates names and a lockfile prefix check covers the
   rest.
 * `[licenses.private] ignore = true` makes cargo-deny skip `publish = false`
@@ -374,7 +374,7 @@ Defer the wgpu decision to Phase 2::
 * A new RustSec advisory can turn `main` red without a code change; the
   weekly run surfaces it, and the fix is an update, a replacement or a
   reasoned ignore.
-* Revisit the allow-list when the owner picks the project licence: a
+* Revisit the allow-list when the project licence is chosen: a
   permissive project licence changes nothing, while `GPL-3.0` would allow
   relaxing the MPL rule.
 

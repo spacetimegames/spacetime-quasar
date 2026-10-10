@@ -47,7 +47,7 @@ checkout. `<repo>` is the checkout itself, `<workspace-root>/spacetime-quasar`.
   `[target.x86_64-unknown-linux-gnu] rustflags` from `.cargo/config.toml`
   (both `--cfg` values were active). The Cargo reference documents that the
   `RUSTFLAGS` environment variable is used instead of all config-file
-  rustflags, not joined with them. *Correction to the owner's flake example:*
+  rustflags, not joined with them. Consequently,
   exporting `RUSTFLAGS` for mold would silently drop any rustflags the
   repository sets in `.cargo/config.toml`.
 * sccache local storage defaults to `~/.cache/sccache` on Linux with a 10 GB
@@ -176,7 +176,7 @@ One `CARGO_TARGET_DIR` per worktree beside the repository::
 mold and sccache in `.cargo/config.toml`::
   Breaks plain `cargo build` on machines without them and on macOS and
   Windows.
-mold through `RUSTFLAGS` (as in the owner's flake example)::
+mold through `RUSTFLAGS`::
   Replaces config-file rustflags instead of joining them.
 `mold -run cargo ...`::
   Works through `LD_PRELOAD` interception; more fragile than a flag and easy
