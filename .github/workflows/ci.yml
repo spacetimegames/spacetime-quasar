@@ -137,7 +137,10 @@ jobs:
         with:
           shared-key: docs
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: gem install asciidoctor -v 2.0.26
+      - name: Install asciidoctor
+        run: |
+          gem install --user-install asciidoctor -v 2.0.26
+          echo "$(ruby -e 'puts Gem.user_dir')/bin" >> "$GITHUB_PATH"
       - name: asciidoctor
         run: git ls-files -z '*.adoc' | xargs -0 -n1 asciidoctor --failure-level WARN -o /dev/null
       - run: cargo doc --workspace --no-deps --locked
