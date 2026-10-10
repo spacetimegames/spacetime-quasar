@@ -200,7 +200,9 @@ surface, device, queue and surface configuration. No `unsafe`.
 | `RedrawLater`
 
 | `Validation`
-| Print the error to stderr.
+| Print the error to stderr only if the previous acquire was not also
+  `Validation`; otherwise count it silently, and print the count with the
+  next printed message.
 | `RedrawLater`
 
 | `Lost`
@@ -226,15 +228,23 @@ surface, device, queue and surface configuration. No `unsafe`.
 ** `Presented` or `Idle`: nothing. An `Idle` window is redrawn by the next
    `Resized`.
 ** `RedrawNow`: `request_redraw()`. After three consecutive `RedrawNow`
-   results without a `Presented`, treat the next one as `RedrawLater`, so a
-   persistent `Outdated` cannot spin.
+   results, treat the next one as `RedrawLater`, so a persistent `Outdated`
+   cannot spin. The counter resets on `Presented` and after each downgrade.
+   `Suboptimal` returns `RedrawNow` although it presented, so a persistently
+   suboptimal surface draws in bursts of up to three frames, then every
+   100 ms; this is accepted.
 ** `RedrawLater`: set a retry deadline 100 ms ahead. In `about_to_wait`,
    when the deadline has passed, clear it and call `request_redraw()`;
    otherwise use `ControlFlow::WaitUntil` with the earlier of the retry
    deadline and the `--exit-after-ms` deadline. With no deadline pending,
    keep `ControlFlow::Wait`.
-** `SurfaceLost`: call `recreate_surface(window.clone())`, then
-  `request_redraw()`; if recreation fails, handle it as a setup error.
+** `SurfaceLost`: the first one calls `recreate_surface(window.clone())`,
+   then `request_redraw()`; if recreation fails, handle it as a setup error.
+   Count consecutive `SurfaceLost` results and reset the count on
+   `Presented`. A second consecutive `SurfaceLost` means recreating the
+   surface did not help, which is the case wgpu documents for a lost device:
+   handle it as a setup error (print, exit 1). A lost device is fatal in
+   Phase 0; the Phase 2 renderer ADR revisits device-loss recovery.
 * Keep Escape, close and `--exit-after-ms`.
 * On an instance, surface, adapter, device or `block_on` error, print the
   error and exit with status 1. This exit is Phase 0 behaviour only: from
