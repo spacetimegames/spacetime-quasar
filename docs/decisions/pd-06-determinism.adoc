@@ -1,0 +1,24 @@
+= PD-06: Determinism: bit-identical across platforms
+:description: Product decision PD-06
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #3 (review ref C14)
+
+*Decision.* Given the same seed and command log, `st-sim` produces bit-identical
+state on every supported platform: Linux x86_64, Windows x86_64, macOS aarch64,
+and wasm32.
+
+*Implications (binding on the Architect and Builders).*
+
+* Enable `rapier3d/enhanced-determinism` and its `parry3d` counterpart.
+* Simulation math uses software `libm` functions, never platform libm.
+* No implicit FMA contraction; no unordered parallel or SIMD reductions in sim code.
+* The determinism test (§5) runs in CI on every platform, and the state hashes are compared _across_ platforms, not just per platform.
+* The renderer is exempt: presentation need not be deterministic.
+* f32 vs f64 for simulation state stays open, decided by Architect ADR together with the large-world coordinate scheme.
+
+*Rationale.* It enables shared replays and keeps lockstep multiplayer viable
+(xref:pd-04-multiplayer-is-not-supported.adoc[PD-04]). The cost is confined to the simulation, which is small (planar, ~200 ships).
+
+*Reference games.* _Factorio_, _StarCraft_, _Age of Empires_ — lockstep;
+desync is the failure mode this decision prevents.

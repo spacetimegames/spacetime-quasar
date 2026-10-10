@@ -1,0 +1,37 @@
+= PD-03: Ship progression: modular sections (L1), growth in the slice
+:description: Product decision PD-03
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #10
+
+*Context.* In EV: Nova a ship is a fixed hull with finite slots. To grow, you
+replace the ship. The product owner wants ships that grow from small to large,
+even changing class, and eventually player-designed ship classes.
+
+*Decision.*
+
+. *Data model L1 from day one.*
+** A ship design is a core (cockpit, reactor) plus attached *sections*: cargo, engines, weapons, shields. Sections attach along a spine or at predefined attachment points.
+** *Ship class is derived* from size and mass, never declared.
+** Designs are versioned `.ron` data generated through `st-geometry` (D6).
+. *The vertical slice's 3 ships (shuttle, fighter, freighter) are authored as L1 designs.*
+. *A taste of growth ships in the slice.* In the shipyard the player can add or remove at least one section type (cargo) on their current ship, with visible geometry, mass and handling changes.
+. *The outfitter's items mount on section slots.* There is no separate slot system.
+. *After the slice: a refit dock.* It is a build mode to attach and remove sections and save a design as a personal ship class.
+
+*Alternatives considered.*
+
+* L0, fixed hulls with slots (EV: Nova, Starsector): rejected as too limiting.
+* L2, free-form block building (Avorion, Space Engineers, Reassembly): very large scope, and it is hard to keep a photoreal "real spacecraft" look. Avorion's build mode is the UX reference for the post-slice refit dock, applied to sections rather than blocks.
+
+*Consequences.*
+
+* Sections double as damage regions (G7) and compound-collider parts (§5).
+* Derived class feeds gameplay: jump fuel cost, which stations can dock the ship, and AI threat assessment.
+* Design validation (mass, power, thrust budgets) lives in `st-sim`, not in the UI (see xref:pd-04-multiplayer-is-not-supported.adoc[PD-04]).
+
+*Reference games.*
+
+* _Starfield_ (ship builder, classes A/B/C) — L1-style modular sections.
+* _Cosmoteer_ — 2D modular growth.
+* _Avorion_ — block-based build mode (UX reference).

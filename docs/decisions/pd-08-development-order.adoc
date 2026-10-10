@@ -1,0 +1,24 @@
+= PD-08: Development order: gameplay first on greybox, art pass later
+:description: Product decision PD-08
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #13 (review refs C4, V1)
+
+*Decision.* Phases are reordered as follows:
+
+. *Foundations and base crates:* time, math, data, RNG; repo, Nix, CI.
+. *Simulation + greybox renderer.* The renderer uses the _final architecture_ (GPU-driven, instanced, forward clustered, depth prepass) but with simple lighting and flat procedural hulls. Result: an ugly but playable loop — fly, trade, fight, land.
+. *Complete gameplay on greybox:* economy, factions, missions, the growth taste (xref:pd-03-ship-progression.adoc[PD-03]). Product-owner playtesting until it is fun.
+. *Beauty corner, in parallel with phase 3:* one ship, one shot, at final visual quality. It proves the photoreal target is reachable early.
+. *Art pass:* renderer quality (PBR model, shadows, reflections, volumetrics, post), quality tiers, and HUD/UI style from Design-artifact exploration (design tokens).
+. *Ports, content completion, hardening.*
+
+*Binding rules.*
+
+* Renderer architecture and the performance budget are established in phase 2 and measured continuously. Only visual _quality_ is deferred.
+* Greybox assets are simple versions of the final procedural descriptors. They are enriched, never thrown away (D6).
+* During development the renderer enforces an 8 GB VRAM cap (the reference target) and explicitly requests the high-performance adapter on hybrid-graphics laptops.
+
+*Reference practice.* Greyboxing / "find the fun first": _Super Mario 64_
+prototypes, Valve's dev textures for _Half-Life 2_ and _Portal_. Beauty corners and
+target renders are standard studio practice.

@@ -1,0 +1,33 @@
+= PD-16: Supervision model: the Orchestrator supervises the process via Jira
+:description: Product decision PD-16
+
+* *Date:* 2026-10-10
+* *Amends:* the charter review (private) P2 (human gates)
+
+*Context.* The product owner does not have the expertise to supervise the
+engineering process (code quality, reviews, phase exits). That supervision must be
+autonomous.
+
+*Decision.*
+
+. *The Orchestrator is the sole supervisor of the engineering process, and Jira `SPAC` is its instrument.*
+** Every unit of work is a Jira issue.
+** Status transitions reflect reality: To Do → In Progress → Done.
+** A Subtask moves to Done only with evidence in a comment: PR link, CI result, reviewer verdict.
+** A phase Epic closes only after an Opus 5.5 phase-gate review, recorded on the Epic.
+** Blockers, escalations and decisions are recorded as comments and linked ADRs.
+. *The product owner is consulted only on product and taste questions,* never on engineering process:
+** game-design choices and lore validation (xref:pd-07-lore-and-naming.adoc[PD-07]);
+** "does it look right" visual sign-offs on screenshots (beauty corner and art pass, xref:pd-08-development-order.adoc[PD-08], xref:pd-12-visual-style-method.adoc[PD-12]);
+** "is it fun" playtests on the greybox (xref:pd-08-development-order.adoc[PD-08]).
++
+The Orchestrator prepares each such question in plain language, with options and references to existing games, and records the answer in Jira and in decisions.
+
+. *The board is the status report.* At any time, the product owner can read SPAC (or `docs/handoff/state.adoc`) to see where the project stands, without understanding the code.
+
+*Amendment (2026-10-10): hands-on testing.* The product owner does not judge code,
+but is available to *try things* at any stage. Therefore:
+
+* *Every phase exit, and any milestone worth seeing, ships something runnable*: a build started with one command (e.g. `nix run`), plus a plain-language "what to try and what to look for" note.
+* The Orchestrator asks for a hands-on test whenever a human impression is useful: controls feel, readability, fun, looks, crashes on the real desktop. The feedback is recorded in Jira (as Bugs or Stories) and, where it changes the design, in decisions.
+* MVP is reached incrementally, so the product owner sees the game grow phase by phase rather than all at once.

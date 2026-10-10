@@ -1,0 +1,10 @@
+= PD-17: macOS: Apple Silicon only
+:description: Product decision PD-17
+
+* *Date:* 2026-10-11
+
+*Decision.* macOS support targets *Apple Silicon (`aarch64-apple-darwin`) only*.
+There are no Intel Macs (`x86_64-apple-darwin`) and no universal binary.
+
+*Rationale.* Apple stopped selling Intel Macs in 2023. Dropping the target
+simplifies the macOS build, packaging and CI matrix.

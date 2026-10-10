@@ -1,0 +1,40 @@
+= PD-04: Multiplayer is not supported, but the architecture targets it
+:description: Product decision PD-04
+
+* *Date:* 2026-10-10
+
+*Context.* Player-designed ship classes (xref:pd-03-ship-progression.adoc[PD-03]) are a natural precursor of online
+play. The agent charter (private) §1 lists multiplayer and netcode as out of scope.
+
+*Decision.* Multiplayer stays *out of scope*: no netcode, servers, accounts or
+runtime network access. However, the software design and architecture are made
+*multiplayer-ready* through these binding constraints:
+
+. *The player is not special.*
+** The simulation drives N pilots; each takes commands from an input source (local device, AI, replay, and later network).
+** No `GameState.player` shortcuts inside systems.
+. *The simulation advances only through commands* (seed + per-tick command log). Replay and network play are the same mechanism.
+. *`st-sim` stays headless.* It can later run as a dedicated server.
+. *Ship designs are versioned, content-hashed files validated by rules in `st-sim`.*
+** A server could reject invalid designs.
+** Players can share designs as files, even in single-player.
+. *Saves separate universe state from pilot state.*
+
+*Vision note.* In multiplayer, another player is effectively an alien
+civilisation: they engineered their ships differently. The same idea applies in
+single-player. Factions (and later alien species) get distinct, data-driven design
+grammars, so their procedurally generated ships look and behave differently.
+References: _Stellaris_ (species ship styles), _Homeworld_, _EVE Online_ (racial
+design languages).
+
+*Consequences.*
+
+* Add to the agent charter (private) §1: "Multiplayer is not supported, but it is the target that shapes the software design and architecture."
+* This strengthens the case for cross-platform determinism (open point #3).
+
+*Reference games.*
+
+* _Factorio_, _StarCraft_, _Age of Empires_ — deterministic lockstep.
+* _EVE Online_ — server-authoritative.
+* _Elite Dangerous_ — peer-to-peer instancing.
+* _Space Engineers_, _Avorion_, _Cosmoteer_, _Kerbal Space Program_ — shared ship design files.

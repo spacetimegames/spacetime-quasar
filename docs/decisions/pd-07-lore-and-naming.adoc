@@ -1,0 +1,18 @@
+= PD-07: Lore and naming: agent-proposed, owner-validated
+:description: Product decision PD-07
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #8 (review ref G15)
+
+*Decision.* Agents draft all lore with dev-time LLMs (xref:pd-05-llm-usage.adoc[PD-05]). The product owner
+validates every piece before it is committed as data.
+
+*Order of work:*
+
+. Main storylines.
+. Civilisation and species types (feeding the per-faction ship design grammars of xref:pd-04-multiplayer-is-not-supported.adoc[PD-04]).
+. Factions, systems, planets and stations.
+. Ships, commodities and mission texts.
+
+*Constraints.* All content is original: no names, lore, ships or assets from
+EV: Nova or other IP. Lore is written in English.

@@ -1,0 +1,18 @@
+= PD-23: The charter is private and pasted, not stored in the game repo
+:description: Product decision PD-23
+
+* *Date:* 2026-10-11
+* *Amends:* xref:pd-15-repository-structure.adoc[PD-15] point 2
+
+*Decision.*
+
+* *The agent charter (private) stays in the private design repo.* The product owner pastes it into Claude Code to start an Orchestrator session.
+* *The public game repo receives only public-safe material:*
+** `AGENTS.md`: operating manual for agents;
+** `docs/`: including ADRs, `docs/decisions/` (product decisions) and `docs/handoff/state.adoc`.
+* *Never committed to the public repo:*
+** Jira site name and cloudId;
+** dev-machine specifics;
+** any other private detail.
++
+Where agents need them locally, they come from the pasted charter or a gitignored local file.

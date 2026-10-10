@@ -1,0 +1,35 @@
+= PD-02: Landing style and spaceport contents (vertical slice)
+:description: Product decision PD-02
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #2 (review ref G3)
+
+*Context.* In EV: Nova, landing is an instant cut to a menu-driven spaceport. The
+prompt listed 3 ship classes and a "starter" shuttle, but no way to obtain the others.
+
+*Decision.*
+
+. *Landing / docking is an automatic cinematic.* The player requests landing; the ship docks by itself with a staged camera shot (2–5 s, skippable); then the spaceport menu opens. There is no manually flown docking.
+. *Spaceport screens in the vertical slice:*
+** *Commodity exchange.*
+** *Mission board.*
+** *Services:* refuel and repair.
+** *Shipyard:* buy the other ship classes, with trade-in.
+** *Outfitter, minimal (5–6 items):* missile ammo, countermeasures, an upgraded laser, a cargo expansion, a shield upgrade.
+. *Bar is out of the slice.* Escort hiring, if any, goes through the mission board.
+
+*Alternatives considered.*
+
+* Instant menu cut (EV: Nova, Starsector) wastes the 3D presentation.
+* Manually flown docking (Elite Dangerous without a docking computer) is slow and repetitive, and awkward with planar flight (xref:pd-01-flight-model.adoc[PD-01]).
+* A full outfitter is deferred: it needs a hardpoint/slot system, per-item data and visible mounted equipment. See open point #10 for the ship-progression model it must fit into.
+
+*Consequences.*
+
+* The docking cinematic doubles as a showcase shot for procedural stations and ships.
+* Shipyard and outfitter items are data (`assets/**/*.ron`), not code.
+
+*Reference games.*
+
+* _Rebel Galaxy_, _Freelancer_, _Elite Dangerous_ (docking computer) — cinematic docking.
+* _EV: Nova_, _Starsector_ — menu spaceports.

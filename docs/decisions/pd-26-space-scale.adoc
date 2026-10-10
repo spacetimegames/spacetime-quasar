@@ -1,0 +1,26 @@
+= PD-26: Space scale: compressed, with a cruise mode
+:description: Product decision PD-26
+
+* *Date:* 2026-10-10
+* *Resolves:* design backlog G10
+
+*Context.* System size, ship speeds, travel time and camera distances set the feel of
+the game and drive the Phase 1 coordinate design (large-world translation, f32 vs f64).
+
+*Decision.* Compressed space with a cruise mode (option "compressed + cruise").
+
+* Bodies in a system are roughly 1–2 minutes apart at normal flight speed.
+* A cruise key multiplies speed several times outside combat; hostiles and nearby objects drop the ship out of cruise.
+* Planets can be rendered large and scenic while travel stays short.
+
+*Alternatives considered.*
+
+* Compressed without cruise (_EV: Nova_): simplest, but planets must be small or close, so the 3D scenery reads as a diorama.
+* Realistic scale with supercruise (_Elite Dangerous_): grandest, but travel dominates play and it needs f64 positions everywhere plus a separate travel mode.
+
+*Consequences.*
+
+* The Architect derives floating-origin thresholds and f32 vs f64 from this in the Phase 1 large-world coordinates ADR.
+* Cruise rules (speed factor, drop-out conditions, interaction with AI and missions) are gameplay details for Phase 2/3; the numbers live in data files.
+
+*Reference games.* _Freelancer_ (cruise engines), _EV: Nova_, _Elite Dangerous_.

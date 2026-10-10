@@ -1,0 +1,18 @@
+= PD-24: NixOS is first-class; the flake is a deliverable
+:description: Product decision PD-24
+
+* *Date:* 2026-10-11
+* *Reinforces:* the agent charter (private) D7 and the Nix-first build constraint
+
+*Decision.* NixOS (with COSMIC) is a fully supported platform. The game repo's
+`flake.nix` is a first-class deliverable, maintained with the code. It must provide:
+
+* `packages.<system>.default` (the game), runnable with `nix run`;
+* `devShells.<system>.default` with the pinned toolchain (`rust-toolchain.toml`, via `rust-overlay` or `fenix`), `mold`, `sccache` and tooling;
+* runtime wrapping of the dynamically loaded libraries: Vulkan loader, Wayland, libxkbcommon and X11 libs, so the binary runs on NixOS without manual `LD_LIBRARY_PATH`;
+* `checks.<system>` mirroring the CI gates that can run under Nix;
+* `formatter`;
+* a pinned `flake.lock`.
+
+A NixOS module or overlay is optional, by Architect ADR. A non-Nix `cargo build`
+path must keep working for contributors without Nix.

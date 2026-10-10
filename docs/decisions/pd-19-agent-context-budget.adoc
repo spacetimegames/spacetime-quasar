@@ -1,0 +1,12 @@
+= PD-19: Agent context budget: stay under 50%
+:description: Product decision PD-19
+
+* *Date:* 2026-10-11
+
+*Decision.* Every agent, the Orchestrator included, keeps its context window
+*below 50% utilisation*. Output quality degrades as context fills ("context rot").
+
+* Subtasks are sized so that a Builder finishes well within 50%. Work that would exceed it is split _before_ assignment.
+* A worker approaching 50% stops, writes a handoff note (what is done, what is next, open questions) to a file or Jira comment, and returns. The Orchestrator then starts a fresh worker from that note.
+* When the Orchestrator itself approaches 50%, it updates `docs/handoff/state.adoc` and Jira and asks the product owner to start a new session from the charter.
+* Workers read only what they need: graft queries, skeletons and exact spans, never whole large files. They return capped reports.
