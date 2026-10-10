@@ -1,0 +1,10 @@
+[package]
+name = "st-hud"
+description = "HUD, menus and spaceport screens."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
