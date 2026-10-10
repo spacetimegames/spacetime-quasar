@@ -1,0 +1,6 @@
+= Contributing
+:description: Git flow, definition of done and verification tags.
+
+Scope: the git flow, the definition of done, and the verification tags.
+
+Status: not yet written (planned for Phase 0)

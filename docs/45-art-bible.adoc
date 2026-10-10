@@ -1,0 +1,6 @@
+= Art bible
+:description: Visual style reference.
+
+Scope: the visual style, palette and asset conventions.
+
+Status: not yet written (planned for Phase 4)

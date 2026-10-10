@@ -1,0 +1,6 @@
+= Save format
+:description: Specification of the save file format.
+
+Scope: the on-disk save format, its versioning and migration rules.
+
+Status: not yet written (planned for Phase 3)

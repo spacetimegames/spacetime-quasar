@@ -1,0 +1,6 @@
+= Content authoring
+:description: RON schemas, ship designs and design grammars.
+
+Scope: the .ron data schemas, how to author ship designs, and the design grammars.
+
+Status: not yet written (planned for Phase 2-3)

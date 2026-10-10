@@ -1,0 +1,6 @@
+= Platform: NixOS with COSMIC
+:description: Build and run notes for NixOS with the COSMIC desktop.
+
+Scope: supported setup, known issues and verification status for NixOS with the COSMIC desktop.
+
+Status: not yet written (planned for Phase 0)

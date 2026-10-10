@@ -1,0 +1,6 @@
+= Game design
+:description: The decided game design plus answered backlog items.
+
+Scope: the decided design, drawn from the xref:decisions/index.adoc[product decisions], plus answered backlog items.
+
+Status: not yet written (planned for Phase 2-3)

@@ -1,0 +1,6 @@
+= Architecture
+:description: Crate graph, data flow, frame loop and the simulation/render split.
+
+Scope: the crate graph, data flow between crates, the frame loop, and the split between simulation and rendering.
+
+Status: not yet written (planned for Phase 0)
