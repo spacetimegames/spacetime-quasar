@@ -69,19 +69,20 @@ Details in [docs/60-contributing.adoc](docs/60-contributing.adoc).
 - Squash-merge, then delete the branch and remove the worktree.
 - A Reviewer's approval is recorded as a PR comment.
 
-## Quality bars (every PR)
+## Quality gates (required on every PR)
 
 ```
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo deny check
 ```
 
-Plus the MSRV job. From Phase 1: cross-platform determinism hash. From Phase 2:
-renderer checks on lavapipe with golden images (updating a golden needs Reviewer
-approval). CI is defined by [ADR 0003](docs/adr/0003-ci-design.adoc); it is being set
-up in Phase 0, so do not assume it runs yet. Run only commands that exist today.
+These three were run by an agent inside `nix develop` on the reference dev machine
+(untagged, passing). `cargo deny check` and the MSRV job are also required but are not
+wired up yet, so they have not been run. CI enforcement is defined by
+[ADR 0003](docs/adr/0003-ci-design.adoc) and is being set up in Phase 0; do not assume it
+runs yet. From Phase 1: cross-platform determinism hash. From Phase 2: renderer checks
+on lavapipe with golden images (updating a golden needs Reviewer approval).
 
 ## Definition of Done (Subtask)
 
@@ -116,7 +117,7 @@ fine in benchmark and verification records. Use repo-relative paths or
 ## Working today
 
 `nix develop` gives the pinned toolchain. Docs check:
-`nix shell nixpkgs#asciidoctor -c asciidoctor --failure-level WARN <file>.adoc`.
+`nix shell nixpkgs#asciidoctor -c asciidoctor --failure-level WARN -o /dev/null <file>.adoc`.
 
 <!-- graft:start -->
 ## Graft — repo context graph

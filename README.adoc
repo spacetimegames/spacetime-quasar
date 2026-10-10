@@ -38,12 +38,15 @@ This enters a shell with the pinned toolchain (see xref:docs/adr/0001-toolchain-
 | `docs/` | All documentation; start at xref:docs/index.adoc[the docs index].
 | `docs/adr/` | Architecture Decision Records.
 | `docs/decisions/` | Product decisions of record.
+| `crates/` | Workspace crates (`st-*`); stubs only so far.
+| `apps/` | The thin game binary; a stub so far.
+| `tools/xtask/` | Developer task runner; a stub so far.
 | `flake.nix`, `flake.lock` | Nix development shell.
 | `rust-toolchain.toml` | Exact Rust toolchain pin.
 | `AGENTS.md` | Operating manual for coding agents.
 |===
 
-Planned, not yet present: `crates/` (reusable `st-*` crates), `apps/` (the thin game binary) and `assets/` (RON data).
+Planned, not yet present: `assets/` (RON data).
 
 == Documentation
 

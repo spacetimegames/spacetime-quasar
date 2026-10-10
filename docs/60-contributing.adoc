@@ -15,24 +15,23 @@ Decisions of record (xref:decisions/index.adoc[product decisions]) and xref:adr/
 * The PR body lists the commands run, their results and their verification levels.
 * PRs are squash-merged; then the branch is deleted and the worktree removed.
 
-== Quality bars
+== Quality gates
 
-Every PR must pass:
+These gates are required on every PR:
 
 [source,sh]
 ----
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo deny check
 ----
 
-and the MSRV job.
+These three commands were run by an agent inside `nix develop` on the reference dev machine and passed (no tag).
+`cargo deny check` and the MSRV job are also required, but are not wired up yet and have not been run.
 From Phase 1 the cross-platform determinism hash is added.
 From Phase 2, renderer checks run on lavapipe with golden images; updating a golden needs Reviewer approval.
 
-CI is being set up in Phase 0.
-It is defined by xref:adr/0003-ci-design.adoc[ADR 0003] and must not be assumed to run today.
+CI enforcement is defined by xref:adr/0003-ci-design.adoc[ADR 0003] and is being set up in Phase 0; do not assume it runs today.
 Toolchain and MSRV rules are in xref:adr/0001-toolchain-msrv-nix.adoc[ADR 0001]; dependency rules in xref:adr/0002-dependency-policy.adoc[ADR 0002].
 
 == Definition of Done

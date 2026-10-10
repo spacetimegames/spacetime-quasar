@@ -22,8 +22,8 @@ Pages marked "stub" exist only to fix their scope; each states its own status.
 
 | 3
 | xref:60-contributing.adoc[Contributing]
-| stub
-| Phase 0
+| written
+| n/a
 
 | 4
 | xref:adr/index.adoc[Architecture Decision Records]
