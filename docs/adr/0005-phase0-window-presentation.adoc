@@ -1,0 +1,325 @@
+= ADR 0005: Present the Phase 0 window through wgpu
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted. Amends the wgpu timing in xref:0002-dependency-policy.adoc[ADR 0002]
+(register row and the alternative "Add wgpu to `Cargo.toml` in Phase 0").
+
+== Date
+
+2026-10-10
+
+== Context
+
+The Phase 0 exit criterion is: "`nix run` opens an empty window on Wayland
+that resizes and closes cleanly." The window code (SPAC-96) creates a winit
+0.30 window with `ApplicationHandler` and `ControlFlow::Wait`, exits on close
+or Escape, and draws nothing.
+
+On Wayland a surface is mapped only once a buffer has been attached and
+committed. winit documents this: windows do not appear on Wayland until
+something draws or presents to them. A window that never presents therefore
+never shows up on the development machine's Wayland compositor, and the exit
+criterion cannot be met without putting pixels in the window.
+
+Constraints:
+
+* xref:0002-dependency-policy.adoc[ADR 0002] approves wgpu 30 but times it
+  for Phase 2, to keep Phase 0 and Phase 1 builds small.
+* The `st-render` crate is "the wgpu renderer" and its stated non-goal is a
+  CPU rendering path. The renderer is GPU-driven by charter.
+* Every crate compiles for the four project targets, including
+  `wasm32-unknown-unknown`; native-only code is `cfg`-gated in `st-platform`
+  and `apps/`.
+* PD-08 binds the renderer, during development, to an 8 GB VRAM cap and to an
+  explicit high-performance adapter request on hybrid-graphics laptops.
+  PD-09 treats the development machine's integrated GPU (Intel GT1) as a
+  smoke-test target only: it must start, pick the lowest tier and warn.
+
+=== Facts verified on 2026-10-10
+
+* winit 0.30.13, `src/platform/wayland.rs`: "Windows don't appear on Wayland
+  until you draw/present to them." winit provides
+  `ActiveEventLoop::owned_display_handle()` and `Window::pre_present_notify()`.
+* wgpu 30.0.1 API, read from the crate source:
+** `wgpu::Queue::present(SurfaceTexture)` presents a frame (there is no
+   `SurfaceTexture::present` in 30.x). Its documentation says that on Wayland
+   it attaches a `wl_buffer` to the `wl_surface` and commits it.
+** `Surface::get_current_texture()` returns the enum
+   `CurrentSurfaceTexture` (`Success`, `Suboptimal`, `Timeout`, `Occluded`,
+   `Outdated`, `Lost`, `Validation`). Its documentation: `Suboptimal` still
+   carries a usable texture and calling `Surface::configure` again is
+   "highly recommended"; `Timeout` and `Occluded` mean skip the frame and try
+   again later; `Outdated` means configure and try again; `Lost` means the
+   surface must be recreated with `Instance::create_surface` and then
+   configured (the device too, if the device itself was lost).
+** On native backends, `request_adapter` and `request_device` return
+   futures that are already complete (`Box::pin(ready(...))` in
+   `src/backend/wgpu_core.rs`).
+** `PowerPreference::from_env()` reads `WGPU_POWER_PREF` and returns `None`
+   when it is unset.
+** `InstanceDescriptor` carries an optional display handle, which is required
+   for the GLES backend on Wayland;
+   `InstanceDescriptor::new_with_display_handle_from_env` builds one and
+   applies the `WGPU_*` environment overrides.
+** `RequestAdapterOptions` has a new field `apply_limit_buckets`, so it is
+   built with `..Default::default()`.
+** Default features: `std`, `parking_lot`, `dx12`, `metal`, `gles`,
+   `vulkan`, `wgsl`, `webgpu`.
+* A scratch workspace (Rust 1.99.0 from rust-overlay, the repository's dev
+  shell for runtime libraries) with a `st-render`-like crate depending only
+  on `wgpu 30.0.1`, and a winit 0.30.13 binary built as described below:
+** builds natively, and `cargo check --target wasm32-unknown-unknown` passes
+   for the wgpu crate;
+** on the development machine (COSMIC on Wayland, hybrid NVIDIA and Intel),
+   the high-performance request selected the NVIDIA RTX 3080 Laptop GPU on
+   the Vulkan backend, the first frame was presented at 1600 by 1200, and the tiling compositor
+   then resized the window to 1906 by 2068, consistent with the window
+   being mapped and placed;
+** with `WGPU_BACKEND=gl` the same binary did not get a window: first
+   surface creation failed for every backend (`libEGL` is not among the dev
+   shell's runtime libraries), and with nixpkgs `libglvnd` added to the
+   library path, no GL adapter was compatible with the Wayland surface.
+   The GLES path on Wayland is therefore unverified and not part of
+   Phase 0.
+* The licence tree of winit 0.30.13 plus wgpu 30.0.1 passes the ADR 0002
+  `deny.toml` (verified for ADR 0002). wgpu adds about 70 crates to
+  `Cargo.lock`.
+* `std::task::Waker::noop()` is stable since Rust 1.85, below the MSRV 1.88.
+* softbuffer 0.4.8 (2025-12-13, `MIT OR Apache-2.0`) is the CPU-buffer
+  alternative.
+
+== Decision
+
+=== wgpu now, in `st-render`
+
+* wgpu 30 is brought forward to Phase 0. The window becomes visible because
+  `st-render` clears the surface to one constant colour and presents it on
+  the first redraw, and on every redraw after a resize.
+* The code lives in a minimal `st-render` entry point, not in `apps/`.
+  The type that owns the instance, surface, device, queue and surface
+  configuration is the seed of the Phase 2 renderer and is extended, not
+  replaced. `st-render` depends on `wgpu` only; it does not depend on winit
+  and takes the window as a `wgpu::SurfaceTarget`, so it keeps compiling for
+  `wasm32-unknown-unknown` without `cfg` gates.
+* `apps/spacetime-quasar` keeps owning winit (native only) and the event
+  loop, and calls `st-render`.
+* No other new dependency. wgpu's adapter and device requests are futures
+  that are already complete on native backends; the binary drives them with
+  a small `block_on` in its native module, built on
+  `std::task::Waker::noop()`:
+** it polls the future; on `Ready` it returns the value;
+** on `Pending` it calls `std::thread::yield_now()` and polls again, because
+   a no-op waker never wakes the thread, so parking would hang forever;
+** it gives up after 5 seconds and returns an error, which the binary treats
+   like any other GPU setup error.
++
+This is correct for wgpu's native futures, which complete on the first
+poll; the spin and the bound only guard against a future wgpu version that
+does real asynchronous work, which then fails loudly instead of hanging.
+A real executor for async loading belongs to `st-platform` later.
+
+=== Phase 2 renderer rules that apply now
+
+* High-performance adapter: yes. `request_adapter` uses
+  `PowerPreference::from_env().unwrap_or(PowerPreference::HighPerformance)`
+  from the start; it is one expression, and on the hybrid development machine
+  it is what selects the discrete GPU. `WGPU_POWER_PREF=low` stays available
+  for debugging and for the GT1 smoke test, consistent with the
+  `WGPU_BACKEND` override.
+  The preference is soft, so a machine with only an integrated GPU or only a
+  software Vulkan driver (llvmpipe/lavapipe) still gets an adapter and a
+  window.
+* 8 GB VRAM cap: no. Phase 0 allocates only the swapchain images; the cap is
+  enforced by the Phase 2 renderer when it allocates resources.
+* Tier selection and the GT1 warning (PD-09): no, Phase 2.
+* Backend choice: wgpu's default backends with environment overrides
+  (`WGPU_BACKEND`). The display handle is passed to the instance because the
+  GLES backend needs it on Wayland, but GLES on Wayland is not a Phase 0
+  target: it failed on the development machine (see the facts above). On
+  Linux, Phase 0 needs Vulkan. The Windows default backend, and whether GLES
+  is a supported Linux fallback (with `libglvnd` in the runtime libraries),
+  are decided by the Phase 2 backend ADR, which also trims wgpu's default
+  features.
+
+=== Implementation instructions for the Builder
+
+==== Dependencies
+
+Add `wgpu = "30.0.1"` to `[workspace.dependencies]`; `crates/st-render`
+uses it with default features for all targets. `apps/spacetime-quasar`
+depends on `st-render` for all targets and keeps winit under
+`cfg(not(target_arch = "wasm32"))`. The ADR 0002 register row is already
+updated by this ADR's PR. Run `cargo deny check`.
+
+==== `st-render`: `WindowSurface`
+
+A documented type (suggested name `WindowSurface`) that keeps the instance,
+surface, device, queue and surface configuration. No `unsafe`.
+
+`async fn new(display: Box<dyn wgpu::wgt::WgpuHasDisplayHandle>, target: impl Into<wgpu::SurfaceTarget<'static>>, width: u32, height: u32) -> Result<Self, Error>`::
+  Creates the instance with
+  `InstanceDescriptor::new_with_display_handle_from_env`, the surface, the
+  adapter (`PowerPreference::from_env().unwrap_or(PowerPreference::HighPerformance)`,
+  `compatible_surface`, `..Default::default()`), the device with
+  `DeviceDescriptor::default()`, and configures the surface from
+  `get_default_config` with `PresentMode::Fifo` (sizes clamped to at
+  least 1). `Error` is a crate error type with one variant per failing step.
+`fn render(&mut self, width: u32, height: u32, pre_present: impl FnOnce()) -> FrameStatus`::
+  Takes the window's current inner size. If either dimension is 0, returns
+  `Idle` without touching the surface. If the size differs from the
+  configuration, reconfigures first. Then acquires the frame and acts on the
+  `CurrentSurfaceTexture` result as in the table below. Drawing means: clear
+  with `LoadOp::Clear` to one constant dark colour in a single render pass,
+  submit, call `pre_present`, then `queue.present(frame)`.
+`fn recreate_surface(&mut self, target: impl Into<wgpu::SurfaceTarget<'static>>) -> Result<(), Error>`::
+  Creates a new surface from the kept instance and configures it with the
+  kept device and configuration (wgpu's documented recovery for `Lost`).
+
+[cols="2,4,2",options="header"]
+|===
+| Acquire result | `render` does | Returns
+
+| `Success`
+| Draw and present.
+| `Presented`
+
+| `Suboptimal`
+| Draw and present this frame, then reconfigure.
+| `RedrawNow`
+
+| `Outdated`
+| Reconfigure, do not draw.
+| `RedrawNow`
+
+| `Timeout`, `Occluded`
+| Nothing.
+| `RedrawLater`
+
+| `Validation`
+| Print the error to stderr only if the previous acquire was not also
+  `Validation`; otherwise count it silently, and print the count with the
+  next printed message.
+| `RedrawLater`
+
+| `Lost`
+| Nothing.
+| `SurfaceLost`
+|===
+
+`FrameStatus` is a public enum with exactly these five variants:
+`Presented`, `Idle`, `RedrawNow`, `RedrawLater`, `SurfaceLost`.
+
+==== Binary: window, redraw and retry
+
+* Hold the window as `Arc<Window>`. In `resumed`, create the window, then
+  the `WindowSurface` with `Box::new(event_loop.owned_display_handle())`
+  and `window.clone()`, driven by `block_on`, then call
+  `window.request_redraw()`. Print the selected adapter's name and backend
+  once.
+* On `Resized`, call `request_redraw()` (the size is applied in `render`).
+  On `Occluded(false)`, call `request_redraw()`.
+* On `RedrawRequested`, call
+  `render(size.width, size.height, || window.pre_present_notify())` with
+  `size = window.inner_size()`, then act on the status:
+** `Presented` or `Idle`: nothing. An `Idle` window is redrawn by the next
+   `Resized`.
+** `RedrawNow`: `request_redraw()`. After three consecutive `RedrawNow`
+   results, treat the next one as `RedrawLater`, so a persistent `Outdated`
+   cannot spin. The counter resets on `Presented` and after each downgrade.
+   `Suboptimal` returns `RedrawNow` although it presented, so a persistently
+   suboptimal surface draws in bursts of up to three frames, then every
+   100 ms; this is accepted.
+** `RedrawLater`: set a retry deadline 100 ms ahead. In `about_to_wait`,
+   when the deadline has passed, clear it and call `request_redraw()`;
+   otherwise use `ControlFlow::WaitUntil` with the earlier of the retry
+   deadline and the `--exit-after-ms` deadline. With no deadline pending,
+   keep `ControlFlow::Wait`.
+** `SurfaceLost`: the first one calls `recreate_surface(window.clone())`,
+   then `request_redraw()`; if recreation fails, handle it as a setup error.
+   Count consecutive `SurfaceLost` results and reset the count on
+   `Presented`. A second consecutive `SurfaceLost` means recreating the
+   surface did not help, which is the case wgpu documents for a lost device:
+   handle it as a setup error (print, exit 1). A lost device is fatal in
+   Phase 0; the Phase 2 renderer ADR revisits device-loss recovery.
+* Keep Escape, close and `--exit-after-ms`.
+* On an instance, surface, adapter, device or `block_on` error, print the
+  error and exit with status 1. This exit is Phase 0 behaviour only: from
+  Phase 2, a present but unsupported or weak GPU (such as the GT1) must
+  start, select the lowest profile and warn (PD-09), and failures that tier
+  selection can work around (for example a device request rejected for
+  limits or features) fall back instead of exiting. Only "no usable adapter
+  at all", where nothing can be drawn, stays a fatal error with a clear
+  message.
+
+==== Verification
+
+On the development machine, in a debug build (wgpu validation on):
+
+* `nix run` (needs the flake's `packages.default` with `vulkan-loader` in
+  the runtime libraries, per ADR 0001) shows the window on COSMIC.
+* Resizing redraws it; Escape and close exit with status 0;
+  `--exit-after-ms 2000` exits with status 0.
+* A resize followed by a close logs no wgpu validation errors.
+* `WGPU_POWER_PREF=low` selects the Intel GPU and still shows the window
+  (GT1 smoke test).
+* Record the adapter lines in the PR.
+
+`WGPU_BACKEND=gl` is not a verification step: GLES on Wayland is outside
+Phase 0 (see the backend choice above), so a failure there would block
+Phase 0 on a path the project has not chosen. CI cannot run the window (no
+GPU, no display) and needs no new job.
+
+== Alternatives considered
+
+softbuffer (CPU fill of a blank frame)::
+  A small dependency that presents through `wl_shm` without a GPU. But it is
+  code on a path the project never ships (`st-render` excludes a CPU
+  rendering path), it would be deleted in Phase 2, and it would hide GPU and
+  driver problems (Vulkan loader wrapping in `nix run`, NVIDIA on NixOS,
+  adapter choice on the hybrid laptop) until then. Those problems are the
+  real Phase 0 risk.
+Surface code in `apps/` for now::
+  Smaller first step, but the binary would gain wgpu as a direct dependency
+  and renderer code that must later move into `st-render`; the binary is
+  meant to be thin glue.
+Raw `wl_shm` buffer through the Wayland client libraries::
+  Same CPU path as softbuffer, written by hand, with `unsafe` and Wayland-only
+  code.
+OpenGL through glutin::
+  A second graphics API and dependency tree that the project does not use.
+`pollster` as the executor::
+  A fine crate, but a new dependency for something `std` already covers
+  while the futures complete immediately.
+Keep wgpu in Phase 2 and accept an invisible window::
+  Fails the Phase 0 exit criterion on Wayland.
+
+== Consequences
+
+* Phase 0 builds carry the wgpu tree (about 70 more crates, longer clean
+  builds; sccache and the slot target directories of ADR 0004 absorb most of
+  it locally, rust-cache in CI).
+* Showing the window needs a working GPU driver for a wgpu backend (Vulkan on
+  Linux, Metal on macOS, DX12 or Vulkan on Windows); in Phase 0 a machine
+  without one gets an error message and exit status 1 instead of an
+  invisible window. Phase 2 narrows that exit to "no usable adapter at all"
+  (PD-09, see the setup-error rule above). On the NixOS development machine the driver comes from the host,
+  and the Vulkan loader from the flake.
+* The `nix run` path exercises GPU driver loading from Phase 0, so problems
+  with runtime wrapping surface early.
+* `st-render` gains a small public API that Phase 2 extends; the Phase 2
+  renderer ADRs (backends, VRAM cap, tiers) build on it.
+* ADR 0002's register row for wgpu now reads Phase 0 and points here.
+
+== References
+
+* winit Wayland platform notes: https://docs.rs/winit/0.30.13/winit/platform/wayland/index.html
+* wgpu 30.0.1: https://docs.rs/wgpu/30.0.1/wgpu/
+* softbuffer: https://crates.io/crates/softbuffer
+* xref:0001-toolchain-msrv-nix.adoc[ADR 0001], xref:0002-dependency-policy.adoc[ADR 0002],
+  xref:0004-build-resources.adoc[ADR 0004]
+* PD-08 and PD-09 in `docs/decisions/`
+* Jira: SPAC-96
