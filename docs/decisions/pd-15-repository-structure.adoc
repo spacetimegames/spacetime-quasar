@@ -1,0 +1,31 @@
+= PD-15: Repository structure
+:description: Product decision PD-15
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #14
+
+*Decision.*
+
+. *Two repositories:*
+** *Design repo* (private, source of this record): brainstorming, xref:index.adoc[the decision index], xref:open-points.adoc[the open points], `research/`. *Private.* It becomes the archive of the design phase.
+** *Game repo `spacetime-quasar`*: *public*, a single Cargo-workspace monorepo. Layout:
+*** `crates/` (st-*), `apps/` (thin binary), `assets/` (`.ron`), `tools/xtask/`, `docs/`, `.github/workflows/`;
+*** root files `flake.nix`, `rust-toolchain.toml`, `deny.toml`, `AGENTS.md`.
+. *When the agent charter (private) is finalised, it moves to the game repo* together with the decisions. The charter and decisions become `docs/` content and ADRs, and `AGENTS.md` becomes the agents' operating manual.
+. *Crates may graduate to their own repos* (history preserved with `git filter-repo`) only if and when they pass the publication review (xref:pd-14-source-hosting.adoc[PD-14]).
+
+*Rationale.* Atomic cross-crate changes, a single CI, and one worktree per agent.
+Monorepo + many published crates is proven practice.
+
+*Reference projects.*
+
+* _Bevy_, _wgpu_, _Veloren_ — workspace monorepos.
+* _Dimforge_ (nalgebra / parry / rapier) — the multi-repo counter-example for mature, independently consumed libraries.
+
+*GitHub organisation: `spacetimegames`* (no hyphen; decided 2026-10-10).
+
+* *Saga vision.* The organisation is the home of a _Spacetime_ saga, not of a single title. Today: `spacetimegames/spacetime-quasar`. Possible future titles: _Spacetime: GammaRayBurst_, _Spacetime: Graviton_, _Spacetime: Quantum_.
+* *Hosting.* Both repos live in the organisation: the game repo as public, the design repo as private.
+* *Creation.* The product owner creates the organisation via the GitHub web UI; organisations cannot be created through the API from a personal account.
+* *Name check.* `spacetime` was taken (a personal account); `spacetimegames` returned 404 on 2026-10-10.
+* *Branding note.* Avoid confusion with Clockwork Labs' _SpacetimeDB_ in crate names and branding.

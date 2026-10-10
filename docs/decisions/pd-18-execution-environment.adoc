@@ -1,0 +1,15 @@
+= PD-18: Execution environment: local Claude Code only (for now)
+:description: Product decision PD-18
+
+* *Date:* 2026-10-11
+
+*Decision.* All agents run from the product owner's machine in local Claude Code
+sessions. No cloud sessions (`claude --cloud`) and no cloud offload of Builders.
+This may be revisited later; if so, cloud workers would communicate only via
+branches, PRs and CI, and only the Orchestrator would update Jira.
+
+*Rationale.*
+
+* The work needs the local GPU (renderer, screenshots, benchmarks, hands-on builds on COSMIC).
+* Nix and Jira are already configured locally.
+* Cloud VMs (~4 vCPU / 16 GB / 30 GB) are smaller than the dev machine and share the same usage limits.

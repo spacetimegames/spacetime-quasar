@@ -1,0 +1,13 @@
+= PD-21: Scope cut: cinematic post effects deferred past the MVP
+:description: Product decision PD-21
+
+* *Date:* 2026-10-11
+* *Resolves:* review item S (partially)
+
+*Decision.* Motion blur, film grain and chromatic aberration are *not in the MVP*.
+The MVP post stack keeps bloom, ACES tonemapping, vignette, TAA/FXAA and sharpening.
+The deferred effects must still fit the "every post effect individually toggleable"
+architecture (xref:pd-10-vr-post-mvp.adoc[PD-10]).
+
+*Rationale.* These are among the effects players disable most often, and VR must
+disable them anyway.

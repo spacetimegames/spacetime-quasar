@@ -1,0 +1,45 @@
+= PD-09: Hardware tiers mapped to reference GPUs
+:description: Product decision PD-09
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #5 (review ref V2, refines the agent charter (private) D8 and §4)
+* *Data:* xref:research-gpu-relative-performance-2026-10.adoc[GPU research]
+
+*Decision.*
+
+[cols="1,1,1",options="header"]
+|===
+|Tier
+|Reference GPUs (≈ % of RTX 4060 desktop)
+|Target
+
+|High (recommended)
+|RTX 4060 / RX 7600 (~100%)
+|1080p, 60 fps, all features
+
+|Medium
+|RTX 3050 8 GB / GTX 1660 Super (~58%)
+|1080p, 60 fps, reduced effects
+
+|Low (minimum)
+|Radeon 780M / Arc 140V (~25–35%)
+|60 fps at 720–900p internal resolution, upscaled to 1080p
+
+|Best effort
+|Iris Xe / Steam Deck (~16%)
+|Starts and is playable, 30 fps at 720p, no guarantee
+
+|Unsupported
+|Intel UHD TigerLake GT1 (~6%)
+|Must start, pick the lowest tier and warn; nothing more
+|===
+
+*Validation.*
+
+* The dev machine's RTX 3080 Laptop (150 W, ~101%) is the High reference machine.
+* No Low-tier hardware is available. Low and Medium are validated by estimate: measured High-tier per-pass GPU timings from the deterministic benchmark replay, scaled by the relative-performance table.
+* Real-hardware validation of Low is deferred to the ports/hardening phase (beta testers or borrowed hardware).
+* The dev iGPU (GT1) is used only as a smoke test: startup, tier selection, warning.
+
+*Consequences.* The agent charter (private) D8 and §1 non-negotiable #1 are updated. Iris Xe moves
+from "low tier must remain playable" to best effort.

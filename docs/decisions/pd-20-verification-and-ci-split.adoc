@@ -1,0 +1,47 @@
+= PD-20: Verification resources and the CI / local split
+:description: Product decision PD-20
+
+* *Date:* 2026-10-11
+* *Amends:* xref:pd-16-supervision-model.adoc[PD-16] (hands-on testing), the agent charter (private) platform verification levels
+
+*Human verification available (product owner):*
+
+[cols="1,1,1",options="header"]
+|===
+|Platform
+|`[human]` verification
+|How
+
+|Linux Wayland (COSMIC) + discrete GPU
+|yes
+|dev machine, RTX 3080 Laptop
+
+|Windows + discrete GPU
+|yes
+|product owner's Windows machine
+
+|Linux X11
+|yes
+|native X11 session (e.g. Xfce) on the dev machine with the real GPU, preferred; a VMware Workstation VM only as a functional smoke test (virtual GPU, no performance meaning)
+
+|macOS (Apple Silicon)
+|*no*
+|`[ci-tested]` only, until a tester with a Mac is found
+|===
+
+*CI vs. local split.*
+
+* *GitHub CI (no GPU)* covers:
+** `fmt`, `clippy`, unit and doc tests;
+** Windows, macOS and wasm32 builds (the only builds we get for macOS and Windows without hardware);
+** the cross-platform determinism hash comparison (xref:pd-06-determinism.adoc[PD-06]);
+** renderer correctness on lavapipe (software Vulkan): shader validation and low-resolution golden images.
+* *Local gates on the dev machine (real GPU)* cover:
+** performance (benchmark replay);
+** the VRAM cap;
+** beauty corner and art-pass screenshots;
+** runs on COSMIC/Wayland.
++
+The Orchestrator runs them and attaches the results as evidence to the Jira issue.
+
+* *No self-hosted runner* on the product owner's machine: the repo is public, and fork PRs could execute code on it.

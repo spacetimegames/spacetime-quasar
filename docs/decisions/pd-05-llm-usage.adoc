@@ -1,0 +1,23 @@
+= PD-05: LLM usage: dev-time only
+:description: Product decision PD-05
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #11; partially #8
+
+*Decision.*
+
+. *No LLM at runtime in the MVP.* Revisit after the MVP. Runtime text (names, mission prose, news) comes from procedural grammars and authored data.
+. *LLMs are used at development time* to author content: lore, faction and system names, mission templates, commodity descriptions. The output is committed as data (`assets/**/*.ron`) and is therefore fixed, reviewable and deterministic.
+
+*Rationale.* Runtime network access is forbidden (§1). Local model weights are
+large binary assets (conflicts with D6) and compete for VRAM with the renderer. LLM
+output is non-deterministic and must never enter the simulation.
+
+*Future hook (non-binding).* If a runtime LLM is added later, it sits behind a
+"narrative provider" boundary, and its outputs are recorded as inputs in the command
+log so replays stay deterministic (xref:pd-04-multiplayer-is-not-supported.adoc[PD-04]).
+
+*Reference games.*
+
+* _EV: Nova_, _No Man's Sky_, _Dwarf Fortress_ — procedural text.
+* _Suck Up!_, LLM NPC mods for _Skyrim_ — runtime LLM, experimental.

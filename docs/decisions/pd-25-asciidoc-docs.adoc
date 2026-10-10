@@ -1,0 +1,17 @@
+= PD-25: Game-repo documentation is AsciiDoc
+:description: Product decision PD-25
+
+* *Date:* 2026-10-11
+
+*Decision.* All documentation in the game repo is written in *AsciiDoc*
+(`.adoc`): `docs/**`, ADRs, product decisions, handoff notes (`state.adoc`,
+`try/phase-<n>.adoc`) and `README.adoc`.
+
+*Exceptions*, only where a tool mandates Markdown:
+
+* `AGENTS.md` (agent-tool convention);
+* rustdoc comments (Markdown by language design);
+* a crate's `README.md`, created only at crates.io publication time, because crates.io renders Markdown only.
+
+*Note.* When this design repo's decisions migrate to the game repo
+(`docs/decisions/`), they are converted to AsciiDoc.

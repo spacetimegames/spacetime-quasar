@@ -1,0 +1,10 @@
+= PD-12: Visual style method
+:description: Product decision PD-12
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #9
+
+*Decision.*
+
+* *3D look:* a written art bible in `docs/` covering the material palette (alloys, paints, roughness ranges), per-system lighting rules, and real photographic references collected by the product owner. It is validated through renderer screenshots and the beauty corner (xref:pd-08-development-order.adoc[PD-08]).
+* *HUD/UI:* during the art pass (xref:pd-08-development-order.adoc[PD-08]), 2–3 style directions are explored with a Design artifact. The product owner picks one, which is converted into design tokens (colour, type, spacing) that `st-hud` implements procedurally. Until then the UI is functional greybox.

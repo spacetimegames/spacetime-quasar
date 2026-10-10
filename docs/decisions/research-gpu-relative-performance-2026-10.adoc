@@ -1,0 +1,111 @@
+= GPU relative performance research snapshot (2026-10-10)
+
+Input for quality-tier calibration (open point #5). The metric is the 3DMark Time
+Spy Graphics score at 2560×1440. Desktop rows come from ComputerBase; laptop and
+iGPU rows are Notebookcheck averages (±15% or more spread from TGP and memory).
+Values marked "~" or ESTIMATE are unverified.
+
+[cols="1,1,1",options="header"]
+|===
+|GPU
+|Time Spy Graphics
+|% of RTX 4060 desktop
+
+|RTX 5090 desktop
+|47,760
+|451%
+
+|RTX 5060 desktop
+|13,620
+|129%
+
+|RX 7600 desktop
+|11,007
+|104%
+
+|RTX 3080 Laptop 16 GB (TGP unstated; ours is 150 W)
+|~10,652
+|~101%
+
+|*RTX 4060 desktop 8 GB*
+|*10,596*
+|*100%*
+
+|RTX 4060 Laptop
+|~10,050
+|~95%
+
+|RTX 3060 desktop
+|8,637
+|82%
+
+|RTX 3050 desktop 8 GB
+|6,193
+|58%
+
+|GTX 1660 Super
+|6,133
+|58%
+
+|Intel Arc 140V (Lunar Lake)
+|~3,910
+|~37%
+
+|Radeon 890M
+|~3,470–3,690 (ESTIMATE)
+|~33–35%
+
+|Radeon 780M
+|~2,601–2,854
+|~25%
+
+|Intel Iris Xe 96EU
+|~1,628–1,805
+|~15–17%
+
+|Steam Deck APU
+|~1,700 (ESTIMATE)
+|~16%
+
+|Intel UHD TigerLake-H GT1 (dev machine iGPU)
+|~670
+|~6%
+|===
+
+Steam Hardware Survey, September 2026, top GPUs (share of all cards):
+
+[cols="1,1",options="header"]
+|===
+|GPU
+|Share
+
+|RTX 5070
+|6.15%
+
+|RTX 5060
+|4.40%
+
+|RTX 5060 Ti
+|4.06%
+
+|RTX 4060
+|3.89%
+
+|RTX 3060
+|3.66%
+
+|RTX 4060 Laptop
+|3.50%
+
+|RTX 3050
+|2.90%
+
+|RTX 4060 Ti
+|2.85%
+|===
+
+Caveats:
+
+* Time Spy is a DX12 synthetic test. Integrated GPUs may behave differently in real games because of shared memory bandwidth.
+* Time Spy does not expose 8 GB VRAM limits.
+* Re-measure with our own deterministic benchmark replay (xref:pd-06-determinism.adoc[PD-06], xref:pd-08-development-order.adoc[PD-08]) before treating any of these as binding.

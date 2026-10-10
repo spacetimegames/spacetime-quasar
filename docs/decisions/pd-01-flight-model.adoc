@@ -1,0 +1,50 @@
+= PD-01: Flight model: planar by default, 3D-ready simulation
+:description: Product decision PD-01
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #1 (review refs G1, C11)
+
+*Context.* EV: Nova is a planar game: rotate, thrust, inertia, speed cap. The agent charter (private)
+D1 says "full 6-DOF 3D presentation", but the design never said whether _gameplay_
+is planar or full 3D. That choice drives controls, camera, AI, combat feel and scope.
+
+*Decision.*
+
+. *Default flight is planar gameplay with full 3D presentation* (option C).
+** Ships move on a plane with EV-style controls.
+** The chase camera sits behind and above the ship.
+** Banking on turns and varied altitude of celestial bodies are visual only.
+. *An in-plane combat mode ships in the vertical slice.* A toggle adds:
+** mouse aim;
+** lateral thrust (strafe);
+** decoupled facing vs. velocity (flight-assist-off style);
+** a closer, lower camera.
++
+The ship never leaves the plane. AI stays planar.
+
+. *The simulation is 3D-native with a releasable planar constraint.* Ship state is full 3D: position, orientation quaternion, linear and angular velocity. The plane is enforced as a constraint (e.g. Rapier `LockedAxes`) rather than by a 2D model.
+. *Free 6-DOF flight (option B) is a post-MVP extension.* When added, it requires:
+** 3D-capable AI so NPCs can follow the player off the plane;
+** a controlled return-to-plane transition when leaving B.
++
+It must not require rewriting the simulation.
+
+*Alternatives considered.*
+
+* (A) Pure top-down planar. Most EV-faithful, but wastes the photoreal PBR target because ships are seen only from above.
+* (B) Full 6-DOF only. Immersive, but brings hard controls, disorientation, an order-of-magnitude harder AI, and a shift of genre toward dogfight sim.
+* (B+C) Switchable at any time from day one. If NPCs stay planar, players exploit altitude; if NPCs follow in 3D, the project pays nearly the full cost of B.
+
+*Consequences.*
+
+* The agent charter (private) D1 is reworded: "full 3D presentation, planar gameplay by default".
+* `st-sim` stores 3D state. AI, collision queries and the determinism test run under the planar constraint in the MVP.
+* The combat mode is mostly input and camera work (`st-game`, input mapping); it needs no extra physics.
+* Design note: if B later dominates combat, C becomes a travel and escape mode. Balance this deliberately when B lands.
+
+*Reference games.*
+
+* _Escape Velocity: Nova_ — planar baseline.
+* _Rebel Galaxy_ — planar gameplay, 3D presentation.
+* _Elite Dangerous_ — flight-assist toggle, 6-DOF.
+* _Star Wars: Squadrons_, _Everspace_ — full 6-DOF.

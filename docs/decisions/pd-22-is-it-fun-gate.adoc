@@ -1,0 +1,10 @@
+= PD-22: "Is it fun?" gate: re-plan after three negative playtests
+:description: Product decision PD-22
+
+* *Date:* 2026-10-11
+
+*Decision.* If the product owner judges the greybox gameplay not fun in *three
+consecutive playtests*, the Orchestrator stops iterating on details. It brings a
+re-plan with options (e.g. flight model tuning, economy simplification, scope
+reduction), in plain language and with reference games, and records the choice as a
+decision.

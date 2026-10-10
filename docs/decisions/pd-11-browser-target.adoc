@@ -1,0 +1,25 @@
+= PD-11: Browser target: deferred past the MVP, WebGPU-only, wasm32 kept green
+:description: Product decision PD-11
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #4 (review refs C10, F8, S)
+
+*Decision.*
+
+. *No browser build in the MVP.* It becomes a post-MVP showcase target (e.g. a playable demo on itch.io).
+. *When built, the browser target is WebGPU-only.* There is no WebGL2 fallback: WebGL2 lacks compute shaders, so a fallback would require a second, CPU-driven render path, violating non-negotiable #3.
+. *The door stays open from day one:*
+** CI compiles the workspace for `wasm32-unknown-unknown` and runs the determinism test there. The wasm32 state hash is part of the cross-platform comparison in xref:pd-06-determinism.adoc[PD-06].
+** Core crates do not use threads or the file system directly; they go through `st-platform` abstractions.
+** Adapter/device acquisition and content loading are async-capable.
+** The main loop is non-blocking (browser-driven frame callbacks).
+
+*Rationale.* In the browser, WebGPU is solid on Windows/macOS/ChromeOS but weak on
+Linux (the primary platform). The browser's value is reach and demos, not visual
+quality. Procedural assets (D6) keep the eventual download tiny.
+
+*Reference games.*
+
+* _Krunker.io_, _Venge.io_ — 3D browser games.
+* _Starblast.io_, _Drednot.io_ — space browser games.
+* itch.io HTML5 catalogue; Unity and Godot WebGPU exports.

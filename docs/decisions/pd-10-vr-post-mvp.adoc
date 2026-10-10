@@ -1,0 +1,27 @@
+= PD-10: VR is not supported in the MVP, but the architecture is VR-ready
+:description: Product decision PD-10
+
+* *Date:* 2026-10-10
+* *Amends:* the agent charter (private) §1 (VR listed as out of scope)
+
+*Context.* Space combat is one of VR's strongest genres (_Elite Dangerous VR_,
+_Star Wars: Squadrons_ VR, _EVE: Valkyrie_). VR is costly for several reasons:
+
+* ~9 M pixels per frame at a stable 90 fps (11.1 ms), against ~2 M at 60 fps for 1080p;
+* several cinematic post effects cause discomfort;
+* it needs a cockpit view, and therefore cockpit interiors;
+* wgpu has no built-in XR, so it goes through OpenXR via the `openxr` crate and Vulkan interop.
+
+*Decision.* VR is out of scope for the MVP. VR becomes a post-MVP goal together
+with free 6-DOF flight (xref:pd-01-flight-model.adoc[PD-01] option B) and a procedural cockpit. Target VR
+platforms are Windows and Linux. The architecture stays VR-ready through these
+binding constraints:
+
+. *The camera abstraction supports N views.* The renderer must not assume a single view (stereo via wgpu `MULTIVIEW` later).
+. *The HUD can render in world space* (diegetic), not only in screen space.
+. *Every post effect can be toggled individually* per render profile, so a future VR profile can disable motion blur, chromatic aberration, film grain and problematic screen-space effects.
+. *The cockpit is a section in the xref:pd-03-ship-progression.adoc[PD-03] ship model*, so a procedural interior can be added later without changing the design format.
+
+*Notes.* No VR headset is currently available to the project. VR validation hardware is a future
+procurement decision. On Linux the options are Monado, WiVRn (Quest streaming) and
+SteamVR; macOS has no practical VR path.

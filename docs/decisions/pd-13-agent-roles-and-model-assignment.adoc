@@ -1,0 +1,76 @@
+= PD-13: Agent roles and model assignment
+:description: Product decision PD-13
+
+* *Date:* 2026-10-10
+* *Supersedes:* nothing; adds to the agent charter (private) §0 D11 and the role table
+
+*Decision.* The agent charter (private) must instruct the team to use every role with the right
+model and reasoning effort.
+
+*Allowed models: version 5.5 only.* `claude-opus-5-5`, `claude-sonnet-5-5` and
+`claude-haiku-5-5`. Never the 5.0 generation (Opus 5, Sonnet 5) and never Fable
+(see below). On 5.5 models the platform default effort is `medium`, and Anthropic
+reports Opus 5.5 at `medium` matching or exceeding Opus 5 at `high`.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Role
+|Model
+|Default effort
+|Raise to
+|Notes
+
+|Orchestrator
+|Opus 5.5
+|`high`
+|— (never `max`)
+|Main session and *sole supervisor of the process* (xref:pd-16-supervision-model.adoc[PD-16]). Never writes shipping code. Preserves its context: reads summaries, not code.
+
+|Architect
+|Opus 5.5
+|`high`
+|`xhigh` for foundational, hard-to-undo ADRs (renderer architecture, sim state and determinism, large-world coordinates, ship design format)
+|Short-lived per decision. Outputs an ADR file plus a short summary.
+
+|Builder
+|Sonnet 5.5
+|`medium`
+|`high` for algorithmic or determinism-sensitive work (render passes, sim math, procedural geometry); `low` for boilerplate and doc-only changes
+|One per Subtask, in its own worktree. *Opus is never used to implement.*
+
+|Reviewer
+|Sonnet 5.5
+|`high`
+|—
+|Per PR. Phase-gate reviews use Opus 5.5 at `high`.
+
+|Researcher
+|Sonnet 5.5
+|`medium`
+|`high` for multi-source comparisons
+|Web/doc research with capped reports.
+
+|Mechanical worker
+|Haiku 5.5
+|`low`
+|`medium` if it fails once
+|Jira CRUD, environment checks, doc lint, formatting.
+|===
+
+*Escalation order.* When a worker fails, first retry with more context, then raise
+its effort one level within the table above, and only then change model.
+
+*`max` effort.*
+
+* Never used on Opus.
+* On Sonnet 5.5 it is allowed only for an explicit security audit.
+* Rationale: the documentation warns of diminishing returns and overthinking. Reported costs are ~13× `medium` per task on Sonnet 5.5 and up to ~50× `low` on trivial tasks.
+
+*Multi-agent workflows ("ultra-code" mode).*
+
+* The session-wide "ultra-code" mode is *not used*. It removes the concurrency and large-workflow safeguards and has no spend cap.
+* Workflow-tool runs are allowed only when the Orchestrator explicitly decides a bounded fan-out is worth it (e.g. a phase-gate audit across the workspace). They use a `small` or `medium` size guideline, and their agents run on Sonnet 5.5 or Haiku 5.5, *never fanned out on Opus*.
+* Reported failures (25 Opus subagents ≈ $70 for one small PR review; 62 Opus subagents exhausting a 5-hour plan window in 18 minutes) all stem from Opus fan-out.
+
+* *Fable is not used for now.* Fable 5.5, expected the week of 2026-10-12, is anticipated to be cheaper and more capable. When it ships, the model assignment table is revisited and the agent charter (private) updated.
+* Workers return compact, capped reports; large outputs go to files.

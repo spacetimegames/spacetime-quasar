@@ -1,0 +1,12 @@
+= PD-14: Source hosting: GitHub, public game repo, no crates.io publishing yet
+:description: Product decision PD-14
+
+* *Date:* 2026-10-10
+* *Resolves:* open point #6 (review ref P4); repository layout continues in open point #14
+
+*Decision.*
+
+. Code is hosted on *GitHub*.
+. *The game repository is public.*
+. *The brainstorming/design repository (private) is separate from the game repository.*
+. *No crate is published to crates.io until its quality has been assessed.* All crates carry `publish = false` until a crate passes an explicit publication review (recorded as an ADR).

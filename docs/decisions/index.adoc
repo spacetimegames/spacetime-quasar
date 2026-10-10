@@ -1,0 +1,144 @@
+= Product decisions
+:description: Index of the product decisions (PD-xx) recorded during the design phase.
+
+Product decisions (PD-xx) are taken by the product owner while resolving the xref:open-points.adoc[open points].
+Each entry is final unless superseded by a later entry.
+They are decisions of record for the agent charter (private) and, where architectural, are refined into ADRs under `docs/adr/`.
+
+The `PD-` prefix avoids clashing with the charter's own decision ids (`D1` ... `D11`).
+
+Supporting material: xref:research-gpu-relative-performance-2026-10.adoc[GPU relative performance research (2026-10)].
+
+[cols="1,4,1,3",options="header"]
+|===
+|Id |Title |Date |File
+|PD-01
+|Flight model: planar by default, 3D-ready simulation
+|2026-10-10
+|xref:pd-01-flight-model.adoc[pd-01-flight-model.adoc]
+
+|PD-02
+|Landing style and spaceport contents (vertical slice)
+|2026-10-10
+|xref:pd-02-landing-style-and-spaceport-contents.adoc[pd-02-landing-style-and-spaceport-contents.adoc]
+
+|PD-03
+|Ship progression: modular sections (L1), growth in the slice
+|2026-10-10
+|xref:pd-03-ship-progression.adoc[pd-03-ship-progression.adoc]
+
+|PD-04
+|Multiplayer is not supported, but the architecture targets it
+|2026-10-10
+|xref:pd-04-multiplayer-is-not-supported.adoc[pd-04-multiplayer-is-not-supported.adoc]
+
+|PD-05
+|LLM usage: dev-time only
+|2026-10-10
+|xref:pd-05-llm-usage.adoc[pd-05-llm-usage.adoc]
+
+|PD-06
+|Determinism: bit-identical across platforms
+|2026-10-10
+|xref:pd-06-determinism.adoc[pd-06-determinism.adoc]
+
+|PD-07
+|Lore and naming: agent-proposed, owner-validated
+|2026-10-10
+|xref:pd-07-lore-and-naming.adoc[pd-07-lore-and-naming.adoc]
+
+|PD-08
+|Development order: gameplay first on greybox, art pass later
+|2026-10-10
+|xref:pd-08-development-order.adoc[pd-08-development-order.adoc]
+
+|PD-09
+|Hardware tiers mapped to reference GPUs
+|2026-10-10
+|xref:pd-09-hardware-tiers.adoc[pd-09-hardware-tiers.adoc]
+
+|PD-10
+|VR is not supported in the MVP, but the architecture is VR-ready
+|2026-10-10
+|xref:pd-10-vr-post-mvp.adoc[pd-10-vr-post-mvp.adoc]
+
+|PD-11
+|Browser target: deferred past the MVP, WebGPU-only, wasm32 kept green
+|2026-10-10
+|xref:pd-11-browser-target.adoc[pd-11-browser-target.adoc]
+
+|PD-12
+|Visual style method
+|2026-10-10
+|xref:pd-12-visual-style-method.adoc[pd-12-visual-style-method.adoc]
+
+|PD-13
+|Agent roles and model assignment
+|2026-10-10
+|xref:pd-13-agent-roles-and-model-assignment.adoc[pd-13-agent-roles-and-model-assignment.adoc]
+
+|PD-14
+|Source hosting: GitHub, public game repo, no crates.io publishing yet
+|2026-10-10
+|xref:pd-14-source-hosting.adoc[pd-14-source-hosting.adoc]
+
+|PD-15
+|Repository structure
+|2026-10-10
+|xref:pd-15-repository-structure.adoc[pd-15-repository-structure.adoc]
+
+|PD-16
+|Supervision model: the Orchestrator supervises the process via Jira
+|2026-10-10
+|xref:pd-16-supervision-model.adoc[pd-16-supervision-model.adoc]
+
+|PD-17
+|macOS: Apple Silicon only
+|2026-10-11
+|xref:pd-17-macos.adoc[pd-17-macos.adoc]
+
+|PD-18
+|Execution environment: local Claude Code only (for now)
+|2026-10-11
+|xref:pd-18-execution-environment.adoc[pd-18-execution-environment.adoc]
+
+|PD-19
+|Agent context budget: stay under 50%
+|2026-10-11
+|xref:pd-19-agent-context-budget.adoc[pd-19-agent-context-budget.adoc]
+
+|PD-20
+|Verification resources and the CI / local split
+|2026-10-11
+|xref:pd-20-verification-and-ci-split.adoc[pd-20-verification-and-ci-split.adoc]
+
+|PD-21
+|Scope cut: cinematic post effects deferred past the MVP
+|2026-10-11
+|xref:pd-21-scope-cut.adoc[pd-21-scope-cut.adoc]
+
+|PD-22
+|"Is it fun?" gate: re-plan after three negative playtests
+|2026-10-11
+|xref:pd-22-is-it-fun-gate.adoc[pd-22-is-it-fun-gate.adoc]
+
+|PD-23
+|The charter is private and pasted, not stored in the game repo
+|2026-10-11
+|xref:pd-23-private-charter.adoc[pd-23-private-charter.adoc]
+
+|PD-24
+|NixOS is first-class; the flake is a deliverable
+|2026-10-11
+|xref:pd-24-nixos-first-class.adoc[pd-24-nixos-first-class.adoc]
+
+|PD-25
+|Game-repo documentation is AsciiDoc
+|2026-10-11
+|xref:pd-25-asciidoc-docs.adoc[pd-25-asciidoc-docs.adoc]
+
+|PD-26
+|Space scale: compressed, with a cruise mode
+|2026-10-10
+|xref:pd-26-space-scale.adoc[pd-26-space-scale.adoc]
+|===
