@@ -50,7 +50,7 @@ All of this is on `main`.
 
 Remaining Phase 0 work:
 
-. The Phase 0 hands-on test note `docs/handoff/try/phase-0.adoc` and the owner test.
+. The owner test, using the xref:try/phase-0.adoc[Phase 0 hands-on test note].
 . The phase-gate review.
 
 Phase 1 (Base crates) needs these ADRs:
