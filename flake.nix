@@ -202,7 +202,10 @@
 
           # ADR 0002: engine crates are also rejected by prefix in the lockfile.
           lockfile-prefix = pkgs.runCommand "lockfile-prefix-check" { } ''
-            ! grep -E '^name = "(bevy|godot|gdnative|fyrox|rg3d|three-d|rend3)([-_][a-z0-9_-]*)?"$' ${./Cargo.lock}
+            if grep -E '^name = "(bevy|godot|gdnative|fyrox|rg3d|three-d|rend3)([-_][a-z0-9_-]*)?"$' ${./Cargo.lock}; then
+              echo "banned engine crate in Cargo.lock"
+              exit 1
+            fi
             touch $out
           '';
         }

@@ -39,7 +39,7 @@ All of this is on `main`.
 * Cargo workspace: 12 `st-*` crate stubs, `tools/xtask` and `apps/spacetime-quasar` (opens the window). It builds and passes fmt, clippy with `-D warnings`, and tests. It also checks on wasm32.
 * CI (GitHub Actions) runs 9 required checks: `fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs` and `nix`. See xref:../adr/0003-ci-design.adoc[ADR 0003].
 * `nix run` starts the game: `packages.default` is built with crane and wraps the Vulkan, Wayland, xkbcommon and X11 libraries through `RUNPATH`. `nix flake check` mirrors the CI gates that can run under Nix (fmt, nixfmt, clippy, test, bench build, doc, asciidoc, deny without advisories, wasm32); the `nix` CI job runs it.
-* Window (the `main` window work is SPAC-96): a visible window through `st-render` (wgpu on Vulkan, ADR 0005) that closes on close or Escape; verified on NixOS with COSMIC on Wayland and an RTX 3080 Laptop GPU (xref:../20-platforms/nixos-cosmic.adoc[platform notes]).
+* Window: a visible window through `st-render` (wgpu on Vulkan, ADR 0005) that closes on close or Escape; verified on NixOS with COSMIC on Wayland and an RTX 3080 Laptop GPU (xref:../20-platforms/nixos-cosmic.adoc[platform notes]).
 * Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0005, the product decision records PD-01 to PD-26, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
 
 == In progress
