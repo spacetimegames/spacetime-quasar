@@ -1,0 +1,57 @@
+= Spacetime: Quasar
+:description: A desktop 3D space trading-and-combat sandbox written in Rust without a game engine.
+
+_Spacetime: Quasar_ is a desktop-first, 3D, photoreal space trading-and-combat sandbox in the shape of _Escape Velocity: Nova_, with entirely original content.
+It is written in Rust without a game engine, composing mature crates such as wgpu, winit and Rapier, plus our own physically based renderer.
+
+The MVP is a vertical slice: 2 star systems, 3 ship classes, trade, at least 3 factions, laser and missile combat, generated missions and a menu spaceport.
+Presentation is full 3D; gameplay is planar by default, on a 3D-native simulation.
+The project is unrelated to SpacetimeDB.
+
+== Goals
+
+* 60 fps at 1080p on an RTX 4060 / RX 7600 class GPU (8 GB), with a Low tier at reduced internal resolution.
+* Desktop-native: Linux/Wayland primary, NixOS with COSMIC fully supported, Windows and macOS (Apple Silicon) first-class, X11 basic; browser (WebGPU) after the MVP.
+* GPU-driven rendering with physically based materials.
+* Fully procedural assets; nothing is downloaded at build or run time.
+* Documented well enough that a competent engineer can build, run, understand and port it from `docs/`.
+
+== Status
+
+Phase 0 (bootstrap). Nothing is playable yet, and there is no game binary to build.
+
+What works today:
+
+[source,sh]
+----
+nix develop
+----
+
+This enters a shell with the pinned toolchain (see xref:docs/adr/0001-toolchain-msrv-nix.adoc[ADR 0001]).
+
+== Repository layout
+
+[cols="1,3",options="header"]
+|===
+| Path | Contents
+
+| `docs/` | All documentation; start at xref:docs/index.adoc[the docs index].
+| `docs/adr/` | Architecture Decision Records.
+| `docs/decisions/` | Product decisions of record.
+| `flake.nix`, `flake.lock` | Nix development shell.
+| `rust-toolchain.toml` | Exact Rust toolchain pin.
+| `AGENTS.md` | Operating manual for coding agents.
+|===
+
+Planned, not yet present: `crates/` (reusable `st-*` crates), `apps/` (the thin game binary) and `assets/` (RON data).
+
+== Documentation
+
+* xref:docs/index.adoc[Documentation map]
+* xref:docs/60-contributing.adoc[Contributing]
+* xref:docs/adr/index.adoc[Architecture Decision Records]
+* xref:docs/decisions/index.adoc[Product decisions]
+
+== Licence
+
+No licence has been chosen yet; all rights reserved.
