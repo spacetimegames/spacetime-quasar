@@ -17,4 +17,9 @@ in the same commit.
 | Dependency policy, licences, bans and advisories
 | Accepted
 | 2026-10-10
+
+| xref:0003-ci-design.adoc[0003]
+| Continuous integration design
+| Accepted
+| 2026-10-10
 |===

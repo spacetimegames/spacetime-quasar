@@ -1,0 +1,415 @@
+= ADR 0003: Continuous integration design
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted
+
+== Date
+
+2026-10-10
+
+== Context
+
+The charter binds this decision:
+
+* PD-20, CI versus local: GitHub CI has no GPU and runs fmt, clippy, unit and
+  doc tests; Windows, macOS and wasm32 builds; the cross-platform determinism
+  hash comparison; renderer correctness on lavapipe (shader validation,
+  low-resolution golden images). Performance, VRAM cap, beauty and art-pass
+  screenshots and COSMIC runs are local gates on the development machine.
+  No self-hosted runner: the repository is public, and a fork PR could run
+  code on the owner's machine.
+* Quality bars on every PR: `cargo fmt --check`;
+  `cargo clippy --workspace --all-targets -- -D warnings`;
+  `cargo test --workspace` (unit and doc tests); an MSRV build job;
+  `cargo deny check`; `cargo bench` harnesses compile.
+* PD-06: the simulation is bit-identical across Linux x86_64, Windows x86_64,
+  macOS aarch64 and wasm32, checked by state hashes compared across platforms
+  in CI; any mismatch blocks merge. The renderer is exempt. The harness
+  arrives in Phase 1; its CI shape is designed here.
+* PD-24: `checks.<system>` in the flake mirror the CI gates that can run
+  under Nix.
+* PD-25: documentation is AsciiDoc.
+* `main` is protected: changes only via PR with required green status checks
+  and no required human approval.
+* xref:0001-toolchain-msrv-nix.adoc[ADR 0001] fixes the toolchain file
+  (1.99.0, five targets including `wasm32-wasip1`) and MSRV 1.88;
+  xref:0002-dependency-policy.adoc[ADR 0002] fixes `deny.toml`.
+
+=== Facts verified on 2026-10-10
+
+* GitHub-hosted standard runners for public repositories: `ubuntu-24.04`
+  (also `ubuntu-latest`; `ubuntu-26.04` exists), `windows-2025` (also
+  `windows-latest`), `macos-26` (also `macos-latest`, arm64, 3 CPUs, 7 GB
+  RAM). Linux and Windows runners have 4 CPUs and 16 GB RAM. All have 14 GB
+  of SSD storage.
+* Actions cache: 10 GB per repository by default, least recently accessed
+  evicted first, entries unused for 7 days removed. Caches written by
+  `pull_request` runs are scoped to that PR and cannot be restored by `main`
+  or other PRs.
+* A job skipped by a condition, or because a job it `needs` failed, reports
+  success to required status checks. A workflow skipped by path or branch
+  filters leaves its checks pending and blocks merge.
+* Latest action releases: `actions/checkout` v7.0.1,
+  `actions/upload-artifact` v7.0.2, `actions/download-artifact` v8.0.2,
+  `Swatinem/rust-cache` v2.9.2, `taiki-e/install-action` v2.87.27 (has
+  manifests for `cargo-deny`, `wasmtime` and `wasm-bindgen`),
+  `cachix/install-nix-action` v31.11.1,
+  `DeterminateSystems/magic-nix-cache-action` v15,
+  `nix-community/cache-nix-action` v7. `EmbarkStudios/cargo-deny-action`
+  v2.1.1 is a container action with its own bundled cargo-deny version.
+* rustup 1.28 removed implicit toolchain installation; `rustup toolchain
+  install` with no arguments installs the toolchain named in
+  `rust-toolchain.toml` (latest rustup: 1.29.0).
+* wasm-bindgen 0.2.129 is the latest crate release, while nixpkgs unstable
+  packages `wasm-bindgen-cli` only up to 0.2.126. The CLI must match the
+  crate version exactly, so the nixpkgs CLI cannot be relied on for
+  wasm-bindgen tests.
+* nixpkgs unstable has `wasmtime` 49.0.2 and `mesa` 26.2.4 with the `swrast`
+  Vulkan driver (lavapipe).
+* crane's `cargoDeny` runs `cargo --offline deny check bans licenses
+  sources` by default: the advisories check needs the network, which the
+  Nix sandbox does not have.
+
+== Decision
+
+=== Workflows, triggers and security
+
+* `.github/workflows/ci.yml` runs on `pull_request` targeting `main` and on
+  `push` to `main`. No `paths` or `paths-ignore` filters (required checks
+  would stay pending). Never `pull_request_target`.
+* Workflow-level `permissions: contents: read`. No secrets are used, so fork
+  PRs run with the same workflow and nothing to steal.
+* `concurrency: group: ci-<ref>`, cancelling in-progress runs for PRs only.
+* Every third-party action is pinned to a full commit SHA with the version in
+  a trailing comment. `.github/dependabot.yml` updates the
+  `github-actions` ecosystem weekly; cargo dependencies are not managed by
+  Dependabot (ADR 0002 admission rules apply).
+* Each job has `timeout-minutes` (30, except `nix` and `render (lavapipe)`
+  at 45).
+* Toolchain setup in every Rust job: `rustup toolchain install` (reads
+  `rust-toolchain.toml`). No toolchain action that duplicates the version.
+* Every cargo command uses `--locked`. `CARGO_TERM_COLOR=always`.
+* CI cargo jobs run without Nix and without mold or sccache: they prove that
+  the plain `cargo build` path works.
+* `.github/workflows/scheduled.yml` runs weekly (and on demand) on `main`:
+  `cargo deny check advisories`. It is not a required check; a failure is
+  triaged per ADR 0002.
+
+=== Jobs
+
+[cols="3,2,6",options="header"]
+|===
+| Check name (job `name:`) | Runner | Steps
+
+| `fmt`
+| `ubuntu-24.04`
+| `cargo fmt --all --check`.
+
+| `test (linux-x86_64)`
+| `ubuntu-24.04`
+| `cargo clippy --workspace --all-targets --locked -- -D warnings`;
+  `cargo test --workspace --locked`;
+  `cargo bench --workspace --no-run --locked`;
+  Phase 1: run the determinism harness, upload `determinism-linux-x86_64`.
+
+| `test (windows-x86_64)`
+| `windows-2025`
+| Same clippy and test steps on the MSVC host toolchain; Phase 1: harness,
+  upload `determinism-windows-x86_64`.
+
+| `test (macos-aarch64)`
+| `macos-26`
+| Same clippy and test steps; Phase 1: harness, upload
+  `determinism-macos-aarch64`.
+
+| `wasm32`
+| `ubuntu-24.04`
+| `cargo clippy --workspace --target wasm32-unknown-unknown --locked -- -D warnings`;
+  `cargo build --workspace --target wasm32-unknown-unknown --locked`;
+  Phase 1: `cargo test` of the simulation crates on `wasm32-wasip1` under
+  wasmtime, harness on `wasm32-wasip1`, upload `determinism-wasm32`.
+
+| `msrv`
+| `ubuntu-24.04`
+| `rustup toolchain install 1.88.0 --profile minimal`;
+  `cargo +1.88.0 build --workspace --all-targets --locked`.
+
+| `deny`
+| `ubuntu-24.04`
+| Install `cargo-deny` 0.20.2 with `taiki-e/install-action`;
+  `cargo deny --locked check`; the `Cargo.lock` engine-prefix check from
+  ADR 0002.
+
+| `docs`
+| `ubuntu-24.04`
+| `gem install asciidoctor -v 2.0.26` (same version as nixpkgs);
+  `asciidoctor --failure-level WARN -o /dev/null` on every tracked `.adoc`
+  file; `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked`.
+
+| `nix`
+| `ubuntu-24.04`
+| `cachix/install-nix-action`, `magic-nix-cache-action`;
+  `nix flake check -L` (builds every `x86_64-linux` check);
+  `nix flake check --all-systems --no-build` (evaluates the
+  `aarch64-darwin` outputs).
+
+| `determinism` (Phase 1)
+| `ubuntu-24.04`
+| Compare job, see below.
+
+| `render (lavapipe)` (Phase 2)
+| `ubuntu-24.04`
+| Renderer tests on lavapipe through Nix, see below.
+|===
+
+Why the gates are placed this way:
+
+* clippy runs on each platform because `cfg`-gated code is only linted on
+  the platform that compiles it. `--all-targets` makes clippy type-check
+  tests and benches everywhere.
+* `cargo bench --no-run` (a release-profile build) runs on Linux only: the
+  per-platform clippy already type-checks bench code, and a second optimised
+  build on Windows and macOS would double their time.
+* wasm32 gets clippy and a build, not `cargo test`: tests for
+  `wasm32-unknown-unknown` need a JavaScript host (see the runner decision
+  below).
+* Required checks are run on the smallest runner set that covers the four
+  target platforms; the scarce macOS runner (3 CPUs) only runs what must run
+  there.
+
+=== Caching
+
+* `Swatinem/rust-cache` v2 in every cargo job, `shared-key` equal to the job
+  name, `save-if: github.ref == 'refs/heads/main'`. PRs restore the `main`
+  cache but do not write: PR caches cannot be shared anyway, and writing them
+  would evict `main` entries from the 10 GB budget.
+* No sccache in CI: rust-cache restores the whole target directory, which is
+  enough for this workspace, and sccache cannot cache incremental crates.
+* The `nix` and `render (lavapipe)` jobs use
+  `DeterminateSystems/magic-nix-cache-action` (the Actions cache, no secrets,
+  safe for forks). If it stops working, `nix-community/cache-nix-action` is
+  the fallback. A Cachix cache needs an owner account and a secret, so it is
+  not used.
+
+=== Required checks for branch protection
+
+The required status checks on `main` are exactly these job names:
+
+Phase 0 (now)::
+  `fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`,
+  `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs`, `nix`
+Added in Phase 1::
+  `determinism`
+Added in Phase 2::
+  `render (lavapipe)`
+
+Job names are set explicitly with `name:` and are never generated from a
+matrix expression, so they stay stable. A check is added to branch protection
+only after the PR that introduces its job has merged and the job has run
+green on `main`; adding a name earlier would block every PR on a check that
+never reports.
+
+=== wasm32 test runner: wasmtime with `wasm32-wasip1`
+
+Phase 1 runs the simulation tests and the determinism harness on
+`wasm32-wasip1` under wasmtime:
+`CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=."`.
+The CI job installs a pinned wasmtime release with
+`taiki-e/install-action`; the flake uses nixpkgs `wasmtime`.
+
+* Plain `#[test]` functions and plain binaries run unchanged; the harness
+  writes its hash file through WASI. No JavaScript host and no
+  test-framework attributes in simulation crates.
+* It runs inside the Nix sandbox, so it can be a flake check.
+* `wasm32-unknown-unknown`, the shipping web target, stays a build and clippy
+  gate for every crate, including the harness.
+
+The two wasm targets compile simulation code to the same wasm instructions
+for integer and IEEE basic operations (`+ - * /`, `sqrt`). They differ in the
+math library behind `f32::sin` and other transcendental functions, as do the
+native platforms (glibc, the MSVC runtime and Apple's libm). PD-06 therefore
+already forces simulation code to avoid the platform math library. The
+Phase 1 harness ADR makes this mechanical (for example clippy
+`disallowed-methods` on the `f32` and `f64` transcendental methods in
+simulation crates, and a pure-Rust math crate admitted under ADR 0002). Hashes
+must not depend on NaN payloads, which wasm leaves non-deterministic. Under
+these rules, a `wasm32-wasip1` hash stands for `wasm32-unknown-unknown`.
+
+`wasm-bindgen-test` (Node or headless browser) is deferred until a crate with
+browser-facing code needs tests (Phase 2 or later), by its own ADR. When it
+comes, CI installs `wasm-bindgen-cli` at the exact version in `Cargo.lock`.
+
+=== Determinism hash comparison (Phase 1 shape)
+
+* Producers: `test (linux-x86_64)`, `test (windows-x86_64)`,
+  `test (macos-aarch64)` and `wasm32` each run the same harness scenarios
+  with the same cargo profile and upload one artifact, named
+  `determinism-<platform>` (`linux-x86_64`, `windows-x86_64`,
+  `macos-aarch64`, `wasm32`), containing one text file: one line per
+  checkpoint, `<scenario> <tick> <hash-hex>`, LF line endings, sorted.
+  Retention 7 days.
+* Compare job `determinism`: `needs` the four producers and runs with
+  `if: ${{ !cancelled() }}`. Its first step fails unless every needed job's
+  result is `success`, because a skipped required job would otherwise count
+  as passed. It downloads `determinism-*`, fails unless exactly four files
+  exist, compares them byte for byte, and on mismatch prints the first
+  differing line for each platform pair. It writes a summary table to the job
+  summary.
+* The Linux file is also compared with a reference file committed in the
+  repository (path set by the Phase 1 harness ADR). A PR that changes
+  simulation behaviour on purpose updates that file, which makes the change
+  visible in review.
+* No `-C target-cpu=native` or other host-dependent code generation flags
+  anywhere in the repository configuration (also ADR 0004).
+
+=== Renderer tests on lavapipe (Phase 2 shape)
+
+* Shader validation (naga parsing and validation of every WGSL module) is
+  plain `cargo test` and runs on all platforms; it needs no GPU.
+* Golden-image tests run in the `render (lavapipe)` job: Nix provides mesa's
+  lavapipe and the Vulkan loader from `flake.lock`, so the rasteriser version
+  is pinned and identical locally and in CI. The job runs
+  `nix develop -c cargo test -p <renderer crate> --features gpu-tests` with
+  `VK_ICD_FILENAMES` pointing at mesa's lavapipe ICD file and wgpu forced to
+  the Vulkan backend. On failure it uploads actual, expected and diff images
+  as an artifact.
+* The same tests are a flake check (`render-lavapipe`) for local runs.
+* Images are low resolution (for example 256 by 144) and compared with a
+  per-pixel tolerance and a maximum count of differing pixels. A `flake.lock`
+  update that changes mesa may require regenerating goldens, in that same
+  PR.
+* If lavapipe does not run inside the Nix sandbox, the check falls back to
+  the dev shell only; that is a Phase 2 finding, not a change to this design.
+
+=== Flake checks versus CI gates
+
+[cols="3,2,5",options="header"]
+|===
+| CI gate | Flake check (`x86_64-linux`) | Notes
+
+| `fmt`
+| `fmt`
+| crane `cargoFmt`. Also `nixfmt`, checking Nix formatting.
+
+| clippy (Linux)
+| `clippy`
+| crane `cargoClippy`, `--all-targets -- -D warnings`.
+
+| tests (unit and doc)
+| `test`
+| crane `cargoTest`; doc tests included.
+
+| bench harness build
+| `bench-build`
+| `cargo bench --no-run`.
+
+| `docs`
+| `doc`, `asciidoc`
+| crane `cargoDoc` with `RUSTDOCFLAGS=-D warnings`; asciidoctor over every
+  `.adoc` with `--failure-level WARN`.
+
+| `deny` (bans, licences, sources)
+| `deny`
+| crane `cargoDeny` plus the lockfile prefix check.
+
+| `wasm32` build
+| `wasm32`
+| crane build with `CARGO_BUILD_TARGET=wasm32-unknown-unknown`.
+
+| Phase 1 harness (Linux and wasip1)
+| `determinism`
+| Runs native and `wasm32-wasip1` (wasmtime) and compares the two with the
+  committed reference: a partial, local version of the CI comparison.
+
+| `render (lavapipe)`
+| `render-lavapipe`
+| Phase 2, see above.
+|===
+
+Gates that cannot be mirrored, and why:
+
+* `deny` advisories: fetching the RustSec database needs the network, which
+  the Nix sandbox forbids.
+* `test (windows-x86_64)`: Nix has no MSVC toolchain. A mingw cross build
+  would test `x86_64-pc-windows-gnu`, which is not a project target.
+* `test (macos-aarch64)`: needs an `aarch64-darwin` builder. The flake
+  defines `checks.aarch64-darwin` and they run on a Mac with Nix, but CI runs
+  Nix on Linux only.
+* `determinism` cross-platform comparison: needs the Windows and macOS
+  outputs above.
+
+Mirrorable but deliberately not mirrored:
+
+* `msrv`: a second complete toolchain (1.88.0) and a second dependency build
+  in every local `nix flake check`, for a gate CI already runs.
+
+=== No self-hosted runner
+
+All jobs use GitHub-hosted runners. Local real-GPU gates (PD-20) are run by
+agents on the development machine and reported in the PR; they are not
+GitHub checks.
+
+== Alternatives considered
+
+One matrix job named `test` with matrix-generated names::
+  Check names would change with matrix edits and silently drop out of branch
+  protection. Explicit names are stable.
+`cargo bench --no-run` on every platform::
+  Doubles build time on the slow runners for little gain over `--all-targets`
+  clippy.
+sccache with the GitHub Actions backend::
+  More cache API traffic and no gain for incremental workspace crates;
+  rust-cache is simpler.
+`EmbarkStudios/cargo-deny-action`::
+  Works, but bundles its own cargo-deny version in a container.
+  `install-action` pins the same version as nixpkgs, so CI and local
+  `nix flake check` agree.
+`wasm-bindgen-test` as the Phase 1 wasm runner::
+  Needs Node or a browser, exact CLI and crate version matching (nixpkgs lags
+  the crate), and test attributes in simulation crates. It tests the shipping
+  target exactly, but determinism does not need it under the math rule
+  above.
+`wasm32-wasip2` instead of `wasip1`::
+  The component model adds nothing to headless hash tests; wasip1 is
+  simpler.
+lavapipe from the Ubuntu `mesa-vulkan-drivers` package::
+  Its version follows the runner image, so goldens would drift with image
+  updates and differ from local runs. Nix pins it.
+Running every check only through Nix in CI::
+  Would no longer prove that a plain `cargo build` works, and cannot cover
+  Windows or macOS.
+A self-hosted runner with a real GPU::
+  Banned: fork PRs could run code on the owner's machine.
+
+== Consequences
+
+* A Builder can write `ci.yml`, `scheduled.yml`, `dependabot.yml` and the
+  flake checks from this ADR.
+* Each PR uses about nine runner jobs in Phase 0 (one on macOS).
+  Public repositories have free standard runners.
+* Linux code is built twice per PR (cargo jobs and the `nix` job); the
+  price for keeping the flake a working deliverable.
+* Phase 1 must ship the harness, its four uploads, the `determinism` job and
+  the reference file together, then add `determinism` to branch protection.
+* Simulation code cannot use platform math functions; the Phase 1 ADR names
+  the replacement.
+* Revisit if the macOS runner queue becomes the bottleneck, if GitHub changes
+  runner labels, or if lavapipe in the Nix sandbox proves unreliable.
+
+== References
+
+* GitHub-hosted runners: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+* Dependency caching: https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching
+* Status checks: https://docs.github.com/en/pull-requests/reference/status-checks
+* rustup changelog: https://github.com/rust-lang/rustup/blob/main/CHANGELOG.md
+* crane: https://github.com/ipetkov/crane
+* wasmtime: https://wasmtime.dev/
+* wasm-bindgen: https://github.com/wasm-bindgen/wasm-bindgen
+* Mesa lavapipe: https://docs.mesa3d.org/drivers/llvmpipe.html
+* xref:0001-toolchain-msrv-nix.adoc[ADR 0001], xref:0002-dependency-policy.adoc[ADR 0002],
+  xref:0004-build-resources.adoc[ADR 0004]
+* Jira: SPAC-89, SPAC-94
