@@ -1,0 +1,15 @@
+= Architecture Decision Records
+
+Architecture Decision Records (ADRs) for _Spacetime: Quasar_.
+New ADRs start from xref:0000-template.adoc[the template] and add a row here
+in the same commit.
+
+[cols="1,5,2,2",options="header"]
+|===
+| ADR | Title | Status | Date
+
+| xref:0001-toolchain-msrv-nix.adoc[0001]
+| Rust toolchain, MSRV and Nix flake foundations
+| Accepted
+| 2026-10-10
+|===

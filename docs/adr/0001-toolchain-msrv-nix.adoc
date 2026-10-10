@@ -1,0 +1,243 @@
+= ADR 0001: Rust toolchain, MSRV and Nix flake foundations
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted
+
+== Date
+
+2026-10-10
+
+== Context
+
+The charter fixes the frame:
+
+* `rust-toolchain.toml` pins the exact toolchain `1.99.0`; it is bumped by ADR.
+  No nightly, no nightly features.
+* MSRV is separate: `rust-version` in the workspace `Cargo.toml`, set by ADR,
+  never below 1.87 (the wgpu floor), and verified by a CI job on that
+  toolchain.
+* Every crate compiles for `x86_64-unknown-linux-gnu`,
+  `x86_64-pc-windows-msvc`, `aarch64-apple-darwin` and
+  `wasm32-unknown-unknown`.
+* `flake.nix` is a first-class deliverable (PD-24): `packages.<system>.default`
+  runnable with `nix run`, a dev shell with the toolchain taken from
+  `rust-toolchain.toml` plus `mold` and `sccache`, runtime wrapping of the
+  Vulkan loader, Wayland, `libxkbcommon` and X11 libraries, `checks.<system>`
+  mirroring CI, a `formatter` and a pinned `flake.lock`.
+  A plain `cargo build` without Nix keeps working.
+  A NixOS module or overlay is optional, by ADR.
+* The development machine runs NixOS on the unstable channel with a hybrid
+  NVIDIA and Intel GPU under Wayland. GPU drivers come from the host system,
+  so the libraries the game loads must stay ABI-compatible with them.
+
+Phase 1 adds a cross-platform determinism harness (PD-06) that runs headless
+on `wasm32-wasip1` (see xref:0003-ci-design.adoc[ADR 0003]), so that target is
+needed in the toolchain as well.
+
+=== Facts verified on 2026-10-10
+
+* Rust 1.99.0 was released on 2026-10-01 (Rust blog release list).
+  The previous stable was 1.98.1 (2026-09-03).
+* `oxalica/rust-overlay` ships the 1.99.0 manifest
+  (`manifests/stable/1.99.0.nix`, date 2026-10-01). A scratch flake using
+  `rust-bin.fromRustupToolchainFile` with the file below built the toolchain:
+  `rustc 1.99.0 (b940084d7 2026-09-28)`, `cargo 1.99.0`, LLVM 23.1.1, with
+  rust-std for all five targets listed below.
+* `ipetkov/crane` latest release is v0.24.0 (2026-08-21) and the repository
+  is active; it provides `buildDepsOnly`, `buildPackage`, `cargoClippy`,
+  `cargoFmt`, `cargoTest`, `cargoDoc`, `cargoDocTest`, `cargoDeny`,
+  `cargoNextest`. `nix-community/naersk` last saw a push on 2026-06-23 and has
+  no such check helpers.
+* `nix-community/fenix` is active, but its `fromToolchainFile` and
+  `toolchainOf` need a `sha256` for a pinned stable version, a second value to
+  keep in sync with `rust-toolchain.toml`.
+* NixOS channels: stable is `nixos-26.05` (ships `rustc` 1.95.0);
+  `nixos-unstable` ships `rustc` 1.98.1. Unstable also has `mold` 2.42.1,
+  `sccache` 0.18.0, `cargo-deny` 0.20.2, `asciidoctor` 2.0.26,
+  `vulkan-loader` 1.4.357.0, `mesa` 26.2.4 (Vulkan drivers include `swrast`,
+  that is lavapipe), `wasmtime` 49.0.2 and `nixfmt` 1.5.0.
+* wgpu 30.0.1 was published on 2026-08-22 with `rust-version = 1.87.0`;
+  winit 0.30.13 (2026-03-02) declares 1.70.0.
+* Rust 1.88.0 stabilised let chains, in edition 2024 only.
+* Cargo resolver `3` (the default for `edition = "2024"`) prefers dependency
+  versions whose `rust-version` is compatible with the package's own.
+
+== Decision
+
+=== Toolchain pin
+
+`rust-toolchain.toml` at the repository root contains exactly:
+
+[source,toml]
+----
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["rustfmt", "clippy", "rust-src", "rust-analyzer"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown",
+    "wasm32-wasip1",
+]
+----
+
+* `rust-src` and `rust-analyzer` are listed so that editors and agents get an
+  analyser that matches the compiler exactly, in and out of Nix.
+* The three native targets are listed on every host so that
+  `cargo check --target <other-native>` and `cargo clippy --target ...` catch
+  `cfg`-gated breakage locally before CI. Linking for another native target
+  is not expected to work locally; real builds happen on native CI runners.
+* `wasm32-wasip1` is for the headless determinism harness (Phase 1), not a
+  shipping target.
+* Bumping the pin needs an ADR. A bump ADR may be one page: new version,
+  release date, rust-overlay availability, and a green CI run including the
+  determinism comparison once it exists. Point releases follow the same rule.
+
+=== MSRV
+
+* The workspace `Cargo.toml` sets `edition = "2024"` and
+  `rust-version = "1.88"` under `[workspace.package]`; every member inherits
+  both with `edition.workspace = true` and `rust-version.workspace = true`.
+  Resolver `3` comes with edition 2024 and keeps `Cargo.lock` MSRV-compatible
+  where possible.
+* Why 1.88 rather than the 1.87 floor: let chains (stable in 1.88, edition
+  2024) are the most ergonomic language change in that range, and no
+  approved dependency needs anything newer.
+* Clippy reads `rust-version` and reports standard-library APIs newer than
+  the MSRV (`incompatible_msrv`), so the pinned-toolchain clippy gate already
+  catches most violations before the MSRV job runs.
+* The `msrv` CI job (xref:0003-ci-design.adoc[ADR 0003]) builds the workspace
+  with exactly 1.88.0.
+* Bump policy: the MSRV moves only by ADR, and only when an approved
+  dependency requires a newer compiler or a stabilised feature or API has a
+  concrete use in the code. It never goes below 1.87 and never above the
+  pinned toolchain. It should not exceed the `rustc` of the current NixOS
+  stable channel (1.95.0 today) unless the ADR explains why. Bumping the
+  toolchain pin does not by itself bump the MSRV.
+
+=== Nix Rust provider: `rust-overlay`
+
+The flake takes the toolchain from `oxalica/rust-overlay` with
+`pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml`.
+`rust-toolchain.toml` stays the single source of truth for Nix, rustup and CI;
+no hash has to be updated on a bump. `rust-overlay.inputs.nixpkgs.follows =
+"nixpkgs"`.
+
+=== Nix build library: crane
+
+The package and the checks use `ipetkov/crane`, with the toolchain from
+`rust-overlay` through `overrideToolchain`. `buildDepsOnly` builds the
+dependency layer once and every check (`cargoClippy`, `cargoTest`,
+`cargoDoc`, `cargoFmt`, `cargoDeny`, ...) reuses it. crane reads `Cargo.lock`
+directly, so there is no `cargoHash` to maintain.
+
+=== nixpkgs pin
+
+* Input: `github:NixOS/nixpkgs/nixpkgs-unstable`, locked in `flake.lock`.
+* Lock updates (`nix flake update`) land as their own PR with green CI, about
+  monthly or when a needed fix lands; never mixed with code changes.
+* Reason: the game process loads the host GPU driver libraries (NVIDIA on
+  the NixOS development machine). Its glibc and loader come from the flake's
+  nixpkgs, so tracking unstable keeps them as close as possible to the host
+  system, which also runs unstable. `nixpkgs-unstable` rather than
+  `nixos-unstable` because the flake also serves `aarch64-darwin`, and the
+  NixOS-gated branch does not wait for Darwin builds.
+* Flake systems: `x86_64-linux` (primary, CI-checked) and `aarch64-darwin`
+  (dev shell and package). `aarch64-linux` is not a project target and is not
+  listed.
+
+=== Runtime wrapping (guidance for the flake Builder)
+
+On Linux the package adds the library directories of `vulkan-loader`,
+`wayland`, `libxkbcommon`, `libx11`, `libxcursor`, `libxi` and `libxrandr` to
+the binary's `RUNPATH` (`patchelf --add-rpath` in `postFixup`), because winit
+and wgpu `dlopen` them. A `wrapProgram` with `LD_LIBRARY_PATH` is the fallback
+if a library is not found through `RUNPATH`. The dev shell exports the same
+list in `LD_LIBRARY_PATH`, so `cargo run` inside it works without manual
+setup. The flake never bundles GPU drivers: on NixOS they come from
+`hardware.graphics` through `/run/opengl-driver`. Running the Nix package on
+a non-NixOS Linux host is out of scope for now.
+
+=== Formatter
+
+`formatter.<system>` is `nixfmt` (the official Nix formatter).
+
+=== NixOS module or overlay: no, for now
+
+The flake exposes `packages`, `devShells`, `checks` and `formatter` only.
+A desktop game client has no service, user or configuration for a NixOS
+module to manage, and `nix run` or `packages.<system>.default` already
+installs it. Revisit when a dedicated server binary appears, or when the
+owner wants to install the game from a system configuration through an
+overlay.
+
+== Alternatives considered
+
+`fenix` instead of `rust-overlay`::
+  Equally capable for stable toolchains, and stronger for nightly and
+  nightly rust-analyzer, which the charter bans. A pinned stable needs a
+  `sha256` beside `rust-toolchain.toml`, so every bump touches two places.
+  `rust-overlay` reads the file alone and is the owner's existing choice.
+`naersk`::
+  Simpler, but less active (last push 2026-06-23) and without per-check
+  helpers, so every flake check would be hand-written.
+Plain `rustPlatform.buildRustPackage`::
+  Uses the nixpkgs compiler (1.98.1 on unstable, 1.95.0 on 26.05) unless
+  wrapped with `makeRustPlatform`, rebuilds all dependencies in one
+  derivation for every check, and needs a `cargoHash` updated on each lockfile
+  change.
+`nixos-26.05` (stable) as the nixpkgs pin::
+  More conservative, but its glibc and Mesa lag the unstable host system,
+  which risks driver-library mismatches when the game loads the host NVIDIA
+  driver. Its compiler version does not matter because the toolchain comes
+  from `rust-overlay`.
+`nixos-unstable` instead of `nixpkgs-unstable`::
+  Gated on NixOS tests that are irrelevant here, and does not wait for
+  Darwin builds.
+MSRV equal to the 1.87 floor::
+  Buys nothing for a game that is not published as a library, and loses let
+  chains.
+MSRV equal to the pinned toolchain::
+  Makes the MSRV job meaningless and excludes distribution compilers
+  (NixOS stable ships 1.95.0).
+`profile = "default"` and fewer targets in `rust-toolchain.toml`::
+  Pulls `rust-docs` everywhere, and without the other native targets local
+  `cargo check --target` fails on a missing standard library.
+
+== Consequences
+
+* One file (`rust-toolchain.toml`) drives rustup, CI and Nix. A toolchain
+  bump is one PR: the file, the bump ADR and possibly `flake.lock` (for a newer
+  rust-overlay manifest).
+* Every CI runner downloads rust-std for five targets: a few seconds per job,
+  accepted.
+* The MSRV job adds one Linux build per PR. Lockfile updates can pull a
+  dependency release that needs a newer compiler; the `msrv` job catches it,
+  and the fix is to hold that dependency back or bump the MSRV by ADR.
+* Code may use let chains; std APIs newer than 1.88 fail clippy.
+* Builders implementing the flake have exact choices: rust-overlay, crane,
+  `nixpkgs-unstable`, systems `x86_64-linux` and `aarch64-darwin`, `nixfmt`,
+  no module and no overlay.
+* Revisit if rust-overlay stops publishing stable manifests promptly, if
+  crane is abandoned, or if driver loading on NixOS breaks because of the
+  unstable pin.
+
+== References
+
+* Rust release list: https://blog.rust-lang.org/releases/
+* Rust 1.88.0 announcement (let chains): https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/
+* rust-overlay: https://github.com/oxalica/rust-overlay
+* fenix: https://github.com/nix-community/fenix
+* crane: https://github.com/ipetkov/crane
+* naersk: https://github.com/nix-community/naersk
+* Cargo resolver versions: https://doc.rust-lang.org/cargo/reference/resolver.html
+* NixOS package search: https://search.nixos.org/packages
+* xref:0002-dependency-policy.adoc[ADR 0002], xref:0003-ci-design.adoc[ADR 0003],
+  xref:0004-build-resources.adoc[ADR 0004]
+* Jira: SPAC-89, SPAC-92
