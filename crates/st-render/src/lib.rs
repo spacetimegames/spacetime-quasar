@@ -1,0 +1,7 @@
+//! The wgpu renderer.
+//!
+//! Planned scope: The wgpu renderer, internally layered into core, pbr, shadow, post and reflection, with an N-view camera. Rendering will be GPU-driven.
+//!
+//! Boundary: this crate is a stub; it has no public API yet.
+//!
+//! Non-goals: No CPU rendering path, no simulation state, and no game-specific types in public signatures.

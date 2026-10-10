@@ -1,0 +1,10 @@
+[package]
+name = "st-platform"
+description = "Operating-system abstractions and per-OS integration."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true

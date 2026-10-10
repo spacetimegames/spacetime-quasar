@@ -1,0 +1,10 @@
+[package]
+name = "st-game"
+description = "Game glue: input mapping, camera rigs, session loop and content wiring."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
