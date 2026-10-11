@@ -225,3 +225,84 @@ fn a_bad_file_at_startup_is_an_error_with_the_file_name() {
     let error = HotData::<Engine>::open(&dir.0, Loader::new()).unwrap_err();
     assert_eq!(error.diagnostics()[0].source, "bad.ron");
 }
+
+/// The owner-found bug (SPAC-108): a bad edit followed by a restore to content
+/// identical to what is in use changes nothing in the snapshot, but it must
+/// still end the problem and say so.
+#[test]
+fn restoring_identical_content_after_a_validation_error_reports_recovered() {
+    let dir = TempDir::new("undo-validation");
+    write(&dir.0, "1.5");
+    let mut hot = open(&dir.0);
+    let clock = Clock::new();
+
+    write(&dir.0, "-3.0");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert!(report.error.is_some() && report.recovered.is_empty());
+    assert!(hot.standing_error().is_some());
+
+    // Back to exactly the original bytes.
+    write(&dir.0, "1.5");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert_eq!(report.recovered, ["main.ron"]);
+    assert!(report.error.is_none(), "{:?}", report.error);
+    assert!(report.reloaded.is_none(), "the values did not change");
+    assert!(hot.standing_error().is_none());
+    assert_eq!(hot.generation(), 0);
+    assert_eq!(thrust(&hot, "main.ron"), 1.5);
+}
+
+#[test]
+fn restoring_identical_content_after_a_syntax_error_reports_recovered() {
+    let dir = TempDir::new("undo-syntax");
+    write(&dir.0, "1.5");
+    let mut hot = open(&dir.0);
+    let clock = Clock::new();
+
+    write(&dir.0, "1.5,, oops");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert_eq!(
+        report.error.unwrap().diagnostics()[0].code.as_str(),
+        "syntax"
+    );
+
+    // A second bad save replaces the first problem; still one standing.
+    write(&dir.0, "-3.0");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert!(report.error.is_some());
+    assert_eq!(hot.standing_error().unwrap().diagnostics().len(), 1);
+
+    write(&dir.0, "1.5");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert_eq!(report.recovered, ["main.ron"]);
+    assert!(report.reloaded.is_none() && report.error.is_none());
+    assert!(hot.standing_error().is_none());
+    assert_eq!(hot.generation(), 0);
+}
+
+/// A good edit to another file does not end a file's problem, and a restore of
+/// the bad file does, with the other file's newer value kept.
+#[test]
+fn a_standing_problem_survives_another_files_good_edit_until_its_own_file_loads() {
+    let dir = TempDir::new("undo-two-files");
+    write_file(&dir.0, "a.ron", "1.5");
+    write_file(&dir.0, "b.ron", "2.5");
+    let mut hot = open(&dir.0);
+    let clock = Clock::new();
+
+    write_file(&dir.0, "a.ron", "-1.0");
+    wait_until(&mut hot, &clock, |r| r.error.is_some());
+
+    write_file(&dir.0, "b.ron", "9.75");
+    let report = wait_until(&mut hot, &clock, |r| r.reloaded.is_some());
+    assert!(report.recovered.is_empty());
+    let standing = hot.standing_error().expect("a.ron still has its problem");
+    assert_eq!(standing.diagnostics()[0].source, "a.ron");
+
+    write_file(&dir.0, "a.ron", "1.5");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert_eq!(report.recovered, ["a.ron"]);
+    assert!(hot.standing_error().is_none());
+    assert_eq!(hot.generation(), 1);
+    assert_eq!(thrust(&hot, "b.ron"), 9.75);
+}

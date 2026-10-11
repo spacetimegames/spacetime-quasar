@@ -167,3 +167,46 @@ fn a_bad_file_at_start_is_an_error_with_its_path() {
     let error = Session::open(&dir.0).err().expect("must fail");
     assert!(error.contains("a.ron:"), "{error}");
 }
+
+/// The owner-found bug (SPAC-108): reject, then restore the identical file.
+/// Nothing in the values changes, yet the error must be cleared and said so.
+#[test]
+fn restoring_the_same_file_after_a_bad_edit_clears_the_error_and_says_so() {
+    let dir = Dir::new("recover");
+    dir.write("a.ron", &text("1000.0"));
+    let mut session = Session::open(&dir.0).unwrap();
+    let mut now = Nanos::ZERO;
+
+    // A value that breaks a rule, then the identical original.
+    dir.write("a.ron", &text("-5.0"));
+    let event = next_event(&mut session, &mut now);
+    assert!(event.contains("EDIT REJECTED"), "{event}");
+    dir.write("a.ron", &text("1000.0"));
+    let event = next_event(&mut session, &mut now);
+    assert!(event.contains("RECOVERED"), "{event}");
+    assert!(event.contains("a.ron is valid again"), "{event}");
+    assert!(event.contains("The error is cleared."), "{event}");
+    assert!(!event.contains("LAST RELOAD ERROR"), "{event}");
+    assert!(!event.contains("OLD values"), "{event}");
+    assert!(session.last_error().is_none());
+    assert_eq!(session.generation(), 0);
+
+    // The reminder is gone with the error: nothing is printed for a while.
+    for _ in 0..30 {
+        now = Nanos::new(now.as_nanos() + 1_000_000_000);
+        assert!(session.poll(now).is_none(), "no more STILL WAITING");
+    }
+
+    // The same with a syntax error.
+    dir.write(
+        "a.ron",
+        "(kind: \"space_envelope\", version: 1, data: (oops",
+    );
+    let event = next_event(&mut session, &mut now);
+    assert!(event.contains("syntax"), "{event}");
+    dir.write("a.ron", &text("1000.0"));
+    let event = next_event(&mut session, &mut now);
+    assert!(event.contains("RECOVERED"), "{event}");
+    assert!(session.last_error().is_none());
+    assert_eq!(session.generation(), 0);
+}
