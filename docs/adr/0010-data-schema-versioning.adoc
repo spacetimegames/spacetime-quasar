@@ -7,6 +7,8 @@ toc::[]
 
 Accepted
 
+Update 2026-10-11: the Phase 1 demo is the dev tool `tools/phase1-demo`, which enables the `hot-reload` feature of `st-game` and `st-platform` itself. The game binary does not depend on `st-game`, so it carries no watcher, and the Nix package is built without one. This is how "Hot reload" below reads for the demo; no rule changes.
+
 == Date
 
 2026-10-11

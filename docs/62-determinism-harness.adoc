@@ -172,4 +172,4 @@ first difference at line 5 (scenario orbit-coast, tick 00000480)
 ----
 
 The new job name is `determinism` `[ci-tested]`: it passed with four equal files in run 38130979625.
-It is not a required check yet: after its first green run on `main`, the owner adds it to branch protection (ADR 0003), which makes ten required checks.
+It is the tenth required check: it was added to branch protection (ADR 0003) after its first green run on `main`.

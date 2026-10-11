@@ -1,0 +1,38 @@
+// PD-31 speed and scale envelope (provisional): starting values to feel, not final.
+// Edit a number and save: the Phase 1 demo (tools/phase1-demo) shows the new
+// figures and a new replay hash within a moment. Units are in the field names.
+// A bad edit is reported with the file, line and column, and the old values stay.
+(
+    kind: "space_envelope",
+    version: 1,
+    data: (
+        // Normal flight speed (PD-31: at most about 1,000 m/s).
+        normal_speed_mps: 1000.0,
+        // Cruise speed is normal speed times this (PD-31: at most 10).
+        cruise_multiplier: 10.0,
+        // Distance from the star to the system edge (PD-31: about 2,000 km).
+        system_radius_km: 2000.0,
+        // Distance between neighbouring bodies. 60 to 120 km is 1 to 2 minutes
+        // at 1,000 m/s (PD-31: bodies 1 to 2 minutes apart at normal speed).
+        body_spacing_km: (min: 60.0, max: 120.0),
+        // Demo only: how fast the test ship speeds up and slows down.
+        acceleration_mps2: 100.0,
+        // Demo only: the world seed of the replay.
+        replay_seed: 31,
+        // Real-world yardsticks for the printout. The simulation never reads them.
+        reference_speeds: [
+            (name: "a person walking", mps: 1.4),
+            (name: "a car on a motorway", mps: 30.6),
+            (name: "a jet airliner", mps: 250.0),
+            (name: "the speed of sound", mps: 343.0),
+            (name: "a rifle bullet", mps: 900.0),
+            (name: "the International Space Station", mps: 7660.0),
+        ],
+        reference_lengths: [
+            (name: "a marathon", km: 42.195),
+            (name: "Italy, top to bottom", km: 1200.0),
+            (name: "Earth's diameter", km: 12742.0),
+            (name: "the Earth-Moon distance", km: 384400.0),
+        ],
+    ),
+)

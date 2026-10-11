@@ -79,11 +79,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI is live ([ADR 0003](docs/adr/0003-ci-design.adoc)). The 9 required checks are
+CI is live ([ADR 0003](docs/adr/0003-ci-design.adoc)). The 10 required checks are
 `fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`,
-`wasm32`, `msrv`, `deny`, `docs` and `nix`. `main` is protected: merging needs a PR
-with all checks green and an up-to-date branch, and merges are squash-only. From
-Phase 1: cross-platform determinism hash. From Phase 2: renderer checks on lavapipe
+`wasm32`, `msrv`, `deny`, `docs`, `nix` and `determinism`. `main` is protected: merging needs a PR
+with all checks green and an up-to-date branch, and merges are squash-only. The
+`determinism` check compares the cross-platform determinism hash. From Phase 2: renderer checks on lavapipe
 with golden images (updating a golden needs Reviewer approval).
 
 ## Build
