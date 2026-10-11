@@ -1,0 +1,26 @@
+= PD-31: Speed and scale envelope (provisional)
+:description: Product decision PD-31
+
+* *Date:* 2026-10-11
+* *Resolves:* the speed-envelope question listed in xref:../adr/0007-large-world-coordinates.adoc[ADR 0007]
+* *Status:* provisional, to be tuned by playtesting
+
+*Context.* ADR 0007 assumes normal flight at most 1,000 m/s, cruise at most 10 times that, systems about 2,000 km across and bodies 1 to 2 minutes apart at normal speed. The owner could not picture these numbers in the abstract.
+
+*Decision.*
+
+* Use the proposed numbers as starting values only: "let's try them".
+* They are not final. They become final only when the owner confirms them after a hands-on test.
+* All of them live in data (`assets/**/*.ron`) and are easy to tune.
+* The Phase 1 and Phase 2 hands-on demos must let the owner feel the speeds and distances and adjust them.
+
+*Alternatives considered.*
+
+* Fixing the numbers now: rejected, the owner cannot judge them without flying.
+
+*Consequences.*
+
+* No code constant depends on these values. Anything derived from them (validity bound, precision margins) is checked against the data when it changes.
+* ADR 0007 keeps its engineering assumptions until the owner confirms the values.
+
+*Reference games.* _EV: Nova_, _Elite Dangerous_.

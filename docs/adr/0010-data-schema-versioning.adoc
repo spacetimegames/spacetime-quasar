@@ -271,6 +271,7 @@ charter's "forward-compatible" saves: files keep working as the game moves
 forward, not that an older build reads a newer file. The policy awaits
 owner confirmation together with the save behaviour (G11, Phase 3) and can
 be revisited by a superseding ADR.
+Update 2026-10-11: PD-34 confirms this policy.
 
 Kinds fall into two classes. The class is a policy, documented in the
 owning crate next to the kind; it is not a runtime flag.
