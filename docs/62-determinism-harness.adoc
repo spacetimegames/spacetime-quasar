@@ -11,7 +11,7 @@ The four producer jobs upload their output, the `determinism` job compares the f
 
 From ADR 0009, these are not built yet: replay files (`st_sim::replay`) and replay scenarios, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, session commands, the `StepError` variants `NotExternal` and `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits. The three scenarios are interim and use different names from the scenarios in ADR 0008.
 
-Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38128682426 passed the harness and reference comparison on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
+Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38130979625 passed the harness, the uploads and the `determinism` compare job on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
 
 == What it checks
 
@@ -167,5 +167,5 @@ first difference at line 5 (scenario orbit-coast, tick 00000480)
     1 of 38 lines differ
 ----
 
-The new job name is `determinism`.
+The new job name is `determinism` `[ci-tested]`: it passed with four equal files in run 38130979625.
 It is not a required check yet: after its first green run on `main`, the owner adds it to branch protection (ADR 0003), which makes ten required checks.
