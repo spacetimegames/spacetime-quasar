@@ -13,6 +13,7 @@ members = [
     "crates/st-rng",
     "crates/st-sim",
     "crates/st-time",
+    "tools/determinism",
     "tools/xtask",
     "apps/spacetime-quasar",
 ]

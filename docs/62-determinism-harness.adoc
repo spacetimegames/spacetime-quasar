@@ -1,0 +1,111 @@
+= Determinism harness
+:description: How to run the cross-platform determinism harness locally and what it checks.
+
+The simulation must be bit-identical on every platform (xref:adr/0008-determinism-implementation.adoc[ADR 0008]).
+The harness runs a few small scenarios on `st-sim`, takes the state hash every 120 ticks, and compares the result with a committed reference file.
+CI runs it on Linux, Windows, macOS and `wasm32-wasip1` (under wasmtime).
+
+Status: minimal.
+`st-sim` has a handful of bodies and one command kind, and the harness has three scenarios.
+The leak detector, tick dumps, the artifact upload and the `determinism` compare job of xref:adr/0003-ci-design.adoc[ADR 0003] are not built yet.
+Each platform job diffs its own output with the reference file instead, which gives the same pass or fail result.
+
+Commands below were run by an agent on the reference dev machine (Linux x86_64) inside `nix develop`, so they carry no tag.
+
+== What it checks
+
+[cols="1,3",options="header"]
+|===
+| Scenario | What it runs
+
+| `solo-burn`
+| One ship near the origin and one scripted pilot: burn, turn, strafe and brake. 600 ticks (5 s).
+
+| `orbit-coast`
+| Eight ships on near-circular orbits whose radii and phases come from `st-rng`. One pilot brakes one ship. 1,200 ticks (10 s).
+
+| `swarm-controls`
+| 64 ships 500 km from the origin, one pilot each. The control changes (with gaps in the sequence numbers) come from `st-rng`. 2,400 ticks (20 s).
+|===
+
+The scenarios are in `st_sim::scenarios`.
+Each has a seed, a setup, a command log (sorted by tick, pilot and sequence number) and a tick count.
+The simulation advances only through `Sim::step`, which takes that tick's commands.
+Commands name a pilot, and a pilot controls a ship; nothing treats one pilot as the player.
+
+The output has one line per checkpoint: `<scenario> <tick> <hash>`.
+The tick is zero-padded to 8 digits and the hash is 16 lower-case hex digits.
+Lines are sorted and end with LF.
+Checkpoints are tick 0, every 120 ticks (1 s) and the final tick.
+The hash is FNV-1a 64 over the canonical byte stream of ADR 0008 (format version 1).
+
+The harness package is `tools/determinism`.
+The expected output is `tools/determinism/reference.txt`.
+It is generated on Linux, kept LF-only by `.gitattributes`, and read by a test with `include_str!`.
+
+== Run it
+
+Everything below runs inside `nix develop`, which provides the pinned toolchain and wasmtime.
+Use your build slot as `CARGO_TARGET_DIR` as described in xref:adr/0004-build-resources.adoc[ADR 0004].
+
+Run the harness and compare:
+
+[source,sh]
+----
+cargo run --release --locked -p determinism -- --out determinism-linux-x86_64.txt
+diff -u tools/determinism/reference.txt determinism-linux-x86_64.txt
+----
+
+Options: `--scenario <name>` runs one scenario, and `--checkpoint-every <n>` takes a hash every `n` ticks to help find the tick where two platforms diverge (CI never changes it).
+Exit status: 0 success, 1 usage or I/O error, 2 a scenario failed.
+
+Run the tests, which include the same comparison:
+
+[source,sh]
+----
+cargo test -p determinism -p st-sim -p st-rng -p st-data -p st-math -p st-time
+----
+
+== Run it on wasm32-wasip1
+
+The dev shell sets `CARGO_TARGET_WASM32_WASIP1_RUNNER` to `wasmtime run --dir=.`.
+Outside the dev shell, set it yourself and install the target (`rust-toolchain.toml` already lists it).
+
+[source,sh]
+----
+cargo test --locked --target wasm32-wasip1 -p st-math -p st-rng -p st-time -p st-sim -p st-data -p determinism
+cargo run --release --locked --target wasm32-wasip1 -p determinism -- --out determinism-wasm32.txt
+diff -u tools/determinism/reference.txt determinism-wasm32.txt
+----
+
+The first command runs the golden tests of `st-rng`, `st-data` and `st-math` and the `st-sim` tests under wasmtime.
+It covers what ADR 0008 and ADR 0010 deferred until this harness existed.
+
+== Change the reference on purpose
+
+A change that alters simulation behaviour changes the hashes.
+Regenerate the reference, review the diff, and say in the PR description why it changed:
+
+[source,sh]
+----
+cargo run --release --locked -p determinism -- --out tools/determinism/reference.txt
+git diff tools/determinism/reference.txt
+----
+
+A hash that differs on one platform only is a determinism bug, not a reason to regenerate.
+Run with `--checkpoint-every 1` on both platforms and compare the first differing line.
+
+== In CI
+
+[cols="2,3",options="header"]
+|===
+| Job | Step
+
+| `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`
+| After `cargo test --workspace`: run the harness in release and `diff` with the reference.
+
+| `wasm32`
+| Install wasmtime 49.0.2 (the nixpkgs version), run the tests on `wasm32-wasip1`, run the harness and `diff` with the reference.
+|===
+
+No job was added, so the nine required check names are unchanged.

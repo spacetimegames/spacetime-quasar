@@ -22,7 +22,7 @@ It states where the project stands; the linked pages hold the detail.
 | Protected. Changes go through a pull request with all 9 required checks green and the branch up to date. Merges are squash-only.
 
 | In flight
-| `st-math` (deterministic math, render origin), not merged yet.
+| Minimal `st-sim` and the determinism harness (SPAC-122), in review.
 
 | Blocked
 | None.
@@ -35,8 +35,8 @@ It states where the project stands; the linked pages hold the detail.
 
 All of this is on `main`.
 
-* Dev shell: `nix develop` gives the pinned Rust 1.99.0 plus sccache, cargo-deny, and mold on Linux only (xref:../adr/0001-toolchain-msrv-nix.adoc[ADR 0001], xref:../adr/0004-build-resources.adoc[ADR 0004]). `nix fmt` works.
-* Cargo workspace: 12 `st-*` crates (4 implemented, listed below; `st-render` drives the window; the other 7 are stubs), `tools/xtask` and `apps/spacetime-quasar` (opens the window). It builds and passes fmt, clippy with `-D warnings`, and tests. It also checks on wasm32.
+* Dev shell: `nix develop` gives the pinned Rust 1.99.0 plus sccache, cargo-deny, wasmtime, and mold on Linux only (xref:../adr/0001-toolchain-msrv-nix.adoc[ADR 0001], xref:../adr/0004-build-resources.adoc[ADR 0004]). `nix fmt` works.
+* Cargo workspace: 12 `st-*` crates (6 implemented, listed below; `st-render` drives the window; the other 5 are stubs), `tools/determinism`, `tools/xtask` and `apps/spacetime-quasar` (opens the window). It builds and passes fmt, clippy with `-D warnings`, and tests. It also checks on wasm32.
 * CI (GitHub Actions) runs 9 required checks: `fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs` and `nix`. See xref:../adr/0003-ci-design.adoc[ADR 0003].
 * `nix run github:spacetimegames/spacetime-quasar`, or `nix run` in a checkout, opens the visible window. `packages.default` is built with crane and wraps the Vulkan, Wayland, xkbcommon and X11 libraries through `RUNPATH`. `nix flake check` mirrors the CI gates that can run under Nix (fmt, nixfmt, clippy, test, bench build, doc, asciidoc, deny without advisories, wasm32); the `nix` CI job runs it.
 * Window: a visible window through `st-render` (wgpu on Vulkan, ADR 0005) that closes on close or Escape; the owner hands-on test passed on 2026-10-11 on NixOS with COSMIC on Wayland, on both the RTX 3080 Laptop GPU and the integrated Intel GPU (xref:try/phase-0.adoc#_result[test result], xref:../20-platforms/nixos-cosmic.adoc[platform notes]).
@@ -44,6 +44,7 @@ All of this is on `main`.
 * `st-time`: fixed-step clock and frame-budget statistics (PR #20).
 * `st-data` core: versioned RON envelope, migrations, canonical BLAKE3 hashes and diagnostics (PR #19).
 * `st-platform` core: filesystem, clock, and a hot-reload watcher behind a feature (PR #21).
+* `st-math` core: deterministic scalar math (`st_math::det`), the render origin and the clippy determinism rules (PR #25).
 * The flake keeps `.ron` data files in its source filter (PR #22).
 * Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0010, the product decision records PD-01 to PD-34, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
 
@@ -52,18 +53,18 @@ All of this is on `main`.
 Phase 1 (Base crates) is in progress.
 All Phase 1 ADRs are merged: math library boundary (xref:../adr/0006-math-library-boundary.adoc[ADR 0006]), large-world coordinates (xref:../adr/0007-large-world-coordinates.adoc[ADR 0007]), determinism implementation (xref:../adr/0008-determinism-implementation.adoc[ADR 0008]), command log and replay format (xref:../adr/0009-command-log-and-replay-format.adoc[ADR 0009]; replays are version-locked, pending owner confirmation) and data schema versioning (xref:../adr/0010-data-schema-versioning.adoc[ADR 0010]).
 
-In progress: `st-math` (deterministic math, render origin).
+In progress: minimal `st-sim` and the determinism harness (SPAC-122; xref:../62-determinism-harness.adoc[how to run it]). The harness runs in the test and `wasm32` jobs and diffs with `tools/determinism/reference.txt`.
 
-After `st-math`, in order:
+Then, in order:
 
-* Minimal `st-sim` and the determinism harness, with its cross-platform hash CI job.
+* The `determinism` compare job (artifact upload of the four outputs), the leak detector and replay files as scenarios.
 * `st-data` hot-reload wiring.
 * The Phase 1 CLI demo: it hot-reloads a `.ron` value and prints validated values plus a deterministic replay hash.
 * The Phase 1 hands-on test.
 
 == Known problems
 
-* The golden tests do not execute on wasm32 in CI yet; CI only builds wasm32. The determinism harness will run them through wasmtime on `wasm32-wasip1`.
+* The `determinism` compare job and the artifact uploads of ADR 0003 are not built yet; each platform job diffs with the committed reference instead. The golden tests of `st-math`, `st-rng`, `st-time`, `st-sim` and `st-data` run on `wasm32-wasip1` under wasmtime in the `wasm32` job.
 * The non-Nix `cargo build` path and MSRV 1.88 are verified only in CI.
 
 == Open owner questions
