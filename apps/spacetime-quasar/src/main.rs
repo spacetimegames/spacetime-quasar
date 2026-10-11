@@ -10,6 +10,12 @@
 //! Debug flag: `--exit-after-ms <n>` exits with status 0 after `n`
 //! milliseconds, so the window can be smoke-tested without a human.
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "exempt from PD-06: ADR 0008"
+)]
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use std::future::Future;

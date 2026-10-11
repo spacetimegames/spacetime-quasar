@@ -366,6 +366,20 @@ PR that changes the dependency. The decisions above are not edited in place.
 | `st-data`; content hash. `default-features = false`, feature `pure` (no C
   or assembly in the build). Admitted through its `Apache-2.0` licence
   alternative.
+
+| `glam`
+| `0.33` (0.33.12 at admission)
+| Phase 1, `st-math` (ADR 0006)
+| The single math library. `default-features = false`, features `f64`,
+  `libm`, `scalar-math`. The minor version follows Rapier's `glamx`.
+  `rust-version` 1.68.2, below the workspace MSRV.
+
+| `libm`
+| `0.2.16`
+| Phase 1, `st-math` (ADR 0008)
+| Default features. Software math for `st_math::det`. A version change goes
+  with an updated golden test and reference file. `rust-version` 1.63, below
+  the workspace MSRV.
 |===
 
 Named by the charter but not yet admitted (sign-off at introduction):

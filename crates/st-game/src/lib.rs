@@ -5,3 +5,9 @@
 //! Boundary: this crate is a stub; it has no public API yet.
 //!
 //! Non-goals: Does not reimplement what the lower crates provide; it only connects them.
+
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "exempt from PD-06: ADR 0008"
+)]

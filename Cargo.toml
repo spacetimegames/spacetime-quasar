@@ -27,6 +27,9 @@ serde_path_to_error = "0.1.20"
 serde_ignored = "0.1.14"
 blake3 = { version = "1.8.7", default-features = false, features = ["pure"] }
 
+glam = { version = "0.33.12", default-features = false, features = ["f64", "libm", "scalar-math"] }
+libm = "0.2.16"
+
 [workspace.package]
 edition = "2024"
 rust-version = "1.88"

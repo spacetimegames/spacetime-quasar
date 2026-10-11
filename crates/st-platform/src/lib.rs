@@ -63,6 +63,12 @@
 //! assert!(read_file_as("no/such/dir/ship.ron", "ship.ron").is_err());
 //! ```
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "exempt from PD-06: ADR 0008"
+)]
+
 mod clock;
 mod fs;
 #[cfg(all(feature = "hot-reload", not(target_arch = "wasm32")))]

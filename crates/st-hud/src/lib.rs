@@ -5,3 +5,9 @@
 //! Boundary: this crate is a stub; it has no public API yet.
 //!
 //! Non-goals: Does not own game state and does not draw outside the renderer's interfaces.
+
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "exempt from PD-06: ADR 0008"
+)]

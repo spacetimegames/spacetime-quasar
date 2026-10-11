@@ -5,3 +5,9 @@
 //! Boundary: this crate is a stub; it has no public API yet.
 //!
 //! Non-goals: Does not rely on authored texture sets as its main path and does not issue GPU commands.
+
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "exempt from PD-06: ADR 0008"
+)]
