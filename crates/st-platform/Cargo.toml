@@ -6,5 +6,15 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# Off by default (ADR 0010, "Hot reload"): development builds on native targets
+# only. The feature adds no dependency; on wasm32 it compiles to nothing.
+hot-reload = []
+
+[dependencies]
+# `Nanos` is the duration type that the clock and the watcher exchange with the
+# simulation side. st-time depends on nothing, so this adds no cycle.
+st-time = { path = "../st-time" }
+
 [lints]
 workspace = true

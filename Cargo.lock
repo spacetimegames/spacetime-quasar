@@ -1706,6 +1706,9 @@ version = "0.0.0"
 [[package]]
 name = "st-platform"
 version = "0.0.0"
+dependencies = [
+ "st-time",
+]
 
 [[package]]
 name = "st-render"
