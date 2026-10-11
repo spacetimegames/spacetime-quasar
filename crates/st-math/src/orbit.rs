@@ -21,6 +21,7 @@
 //! textbook vector `(x, y, z)` is the world vector `(x, z, -y)`. That map is a rotation
 //! (determinant +1), so handedness is preserved, and it only permutes components and
 //! negates one, which is exact.
+//! ADR 0007, section "Amendment 2026-10-11: orbital reference frame", records this convention.
 //!
 //! # Scope
 //!
