@@ -32,9 +32,12 @@ blake3 = { version = "1.8.7", default-features = false, features = ["pure"] }
 glam = { version = "0.33.12", default-features = false, features = ["f64", "libm", "scalar-math"] }
 libm = "0.2.16"
 
+# ADR 0007: the physics stack, in st-sim only. Parry only through rapier3d_f64::parry.
+rapier3d-f64 = { version = "0.36.1", default-features = false, features = ["dim3", "f64", "alloc", "enhanced-determinism"] }
+
 [workspace.package]
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 
 [workspace.lints.rust]
 missing_docs = "warn"
@@ -44,3 +47,23 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "deny"
+
+# The physics stack is unusably slow unoptimised (ADR 0008's physics-swarm runs 7,200
+# ticks of 200 compound bodies in several tests). Optimising it in the dev and test
+# profiles changes no floating-point result: rustc never reassociates or fuses.
+[profile.dev.package.rapier3d-f64]
+opt-level = 3
+[profile.dev.package.parry3d-f64]
+opt-level = 3
+[profile.dev.package.glamx]
+opt-level = 3
+[profile.dev.package.glam]
+opt-level = 3
+[profile.dev.package.nalgebra]
+opt-level = 3
+[profile.dev.package.simba]
+opt-level = 3
+[profile.dev.package.wide]
+opt-level = 3
+[profile.dev.package.libm]
+opt-level = 3

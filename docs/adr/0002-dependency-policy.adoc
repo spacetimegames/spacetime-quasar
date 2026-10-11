@@ -380,11 +380,18 @@ PR that changes the dependency. The decisions above are not edited in place.
 | Default features. Software math for `st_math::det`. A version change goes
   with an updated golden test and reference file. `rust-version` 1.63, below
   the workspace MSRV.
+
+| `rapier3d-f64`
+| `0.36` (0.36.1 at admission)
+| Phase 1, `st-sim` only (ADR 0007, ADR 0008)
+| `default-features = false`, features `dim3`, `f64`, `alloc`,
+  `enhanced-determinism`. Parry only through `rapier3d_f64::parry`.
+  Raises the MSRV to 1.89 (nalgebra 0.35, wide 1.x).
 |===
 
 Named by the charter but not yet admitted (sign-off at introduction):
 `bytemuck` (trivial); `image` (sign-off, decoders limited to the formats
-used); `rapier3d` and `parry3d` (ADR required, because of PD-06 determinism
+used); the f32 `rapier3d` and a direct `parry3d` (ADR 0007 admits only `rapier3d-f64`, with Parry through it; PD-06 determinism
 features and float behaviour).
 
 == Alternatives considered

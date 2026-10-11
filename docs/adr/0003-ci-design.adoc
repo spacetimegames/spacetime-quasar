@@ -6,8 +6,8 @@ toc::[]
 == Status
 
 Accepted. The `msrv` job toolchain (1.88.0) is amended by
-xref:0007-large-world-coordinates.adoc[ADR 0007]: it becomes 1.89.0 in the PR
-that adds `rapier3d-f64`. The Phase 1 harness details this ADR leaves open
+xref:0007-large-world-coordinates.adoc[ADR 0007]: it became 1.89.0 in the PR
+that added `rapier3d-f64` (SPAC-128). The Phase 1 harness details this ADR leaves open
 (including the reference-file path) are set by
 xref:0008-determinism-implementation.adoc[ADR 0008].
 
@@ -40,7 +40,7 @@ The charter binds this decision:
 * `main` is protected: changes only via PR with required green status checks
   and no required human approval.
 * xref:0001-toolchain-msrv-nix.adoc[ADR 0001] fixes the toolchain file
-  (1.99.0, five targets including `wasm32-wasip1`) and MSRV 1.88;
+  (1.99.0, five targets including `wasm32-wasip1`) and MSRV 1.89 (amended from 1.88);
   xref:0002-dependency-policy.adoc[ADR 0002] fixes `deny.toml`.
 
 === Facts verified on 2026-10-10
