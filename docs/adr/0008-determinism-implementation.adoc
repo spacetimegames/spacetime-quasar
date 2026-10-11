@@ -1,0 +1,757 @@
+= ADR 0008: Determinism implementation
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted. Sets the harness details that
+xref:0003-ci-design.adoc[ADR 0003] leaves to "the Phase 1 harness ADR",
+including the reference-file path.
+
+== Date
+
+2026-10-11
+
+== Context
+
+The charter and the product decisions bind this decision:
+
+* PD-06: given the same seed and command log, `st-sim` produces bit-identical
+  state on Linux x86_64, Windows x86_64, macOS aarch64 and wasm32. CI checks
+  state hashes across platforms, and any mismatch blocks merge. The renderer
+  is exempt. `rapier3d/enhanced-determinism` and its Parry counterpart are
+  enabled. Simulation math uses a software libm, never the platform libm.
+  There is no implicit FMA contraction and no unordered parallel or SIMD
+  reduction in simulation code.
+* PD-04: the player is not special; N pilots are fed by input sources. The
+  simulation advances only through commands (seed plus per-tick command
+  log), and `st-sim` stays headless.
+* Crates: `st-math` provides deterministic math through a software libm;
+  `st-time` provides the deterministic fixed step; `st-rng` provides
+  seedable, stateless random numbers with an explicit derivation per gameplay
+  decision. The acceptance test is: from a seed and a command log, 60 s of
+  combat produce a world-state hash, compared across the four platforms in
+  CI.
+* xref:0003-ci-design.adoc[ADR 0003] fixes the CI shape. Four producer jobs
+  (`test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)` and
+  `wasm32`, the last one on `wasm32-wasip1` under wasmtime) upload one file
+  each, and the `determinism` job compares them. ADR 0003 leaves the harness,
+  the reference-file path and the mechanical enforcement of the math rules to
+  this ADR.
+* xref:0006-math-library-boundary.adoc[ADR 0006] makes glam 0.33 the single
+  math library. xref:0007-large-world-coordinates.adoc[ADR 0007] makes the
+  simulation f64 on `rapier3d-f64` 0.36.1.
+* xref:0010-data-schema-versioning.adoc[ADR 0010] makes data loading
+  deterministic (typed float parsing, ordered maps, sorted file sets) and
+  defines the BLAKE3 content and data-set hashes. It asks that the
+  determinism harness load the `st-data` golden fixtures and compare the
+  data-set hash on all four targets.
+* The command-log and replay file format belongs to ADR 0009 (later). This
+  ADR defines only what that format plugs into. The harness is implemented
+  under SPAC-76.
+
+=== Facts verified on 2026-10-11
+
+From the published sources of `rapier3d-f64` 0.36.1, `parry3d-f64` 0.31.1,
+`glamx` 0.3.1, `simba` 0.10.2, `wide` 1.7.1 and `libm` 0.2.16, and from
+scratch crates built outside the repository with Rust 1.99.0 on the
+development machine (Intel Core i9-11980HK, Linux, glibc 2.44):
+
+*What `enhanced-determinism` does.*
+
+* `rapier3d-f64/enhanced-determinism` enables `simba/libm_force` and
+  `parry3d-f64/enhanced-determinism`. The Parry feature enables
+  `simba/libm_force`, `indexmap`, `glamx/libm` and `glamx/scalar-math`.
+* Under it, Rapier and Parry replace hash maps with `IndexMap`
+  (insertion-ordered), and Rapier's contact solver canonicalises `-0.0` to
+  `+0.0`. Enabling `simd8` together with it is a `compile_error!`.
+* The solver always uses 4-lane SIMD (`SimdReal = simba::simd::WideF64x4`,
+  backed by `wide`): SSE2 on x86_64, NEON on aarch64, scalar fallback on
+  wasm32 without `simd128`. Lane-wise IEEE operations give the same results
+  on all three.
+* With `libm_force`, simba computes scalar functions and per-lane SIMD
+  `sin` and `cos` through the `libm` crate. However, simba's `simd_mul_add`
+  calls `wide`'s `mul_add`, which is fused on aarch64 NEON (`vfmaq`) and on
+  x86 only with the `fma` target feature. Rapier, Parry and glamx at these
+  versions contain no `mul_add` or `simd_mul_add` calls (searched).
+
+*Why it is not sufficient: method resolution.*
+
+* In a crate compiled `+#![no_std]+`, method syntax such as `x.acos()` on an
+  `f64` resolves to std's inherent `f64::acos`, which calls the platform
+  libm. That happens as soon as any dependency the crate refers to is built
+  with std, even with `simba::scalar::ComplexField` imported and even
+  without `extern crate std`.
+* Two-crate experiment: a `+#![no_std]+` crate importing a trait whose `acos`
+  returns 42.0 printed 42 on its own. After it re-exported a std-linked
+  dependency, it printed 1.0471975511965979, which is std's `acos`.
+* Parry's `enhanced-determinism` pulls in `indexmap` with default features
+  (std). So Parry, and Rapier on top of it, always see std's float methods,
+  whatever their own `std` feature says. glamx sees them whenever a
+  dependency it references, such as glam, is built with std.
+* Measured on 10^6^ random inputs, glibc and `libm` 0.2.16 differ bit-wise
+  for 7.6 % of `acos`, 3.1 % of `sin` and `cos`, 18 % of `atan2` and 9.7 % of
+  `exp` results. They also differ for 0.1 % of `log2` over integer inputs.
+
+*Observed divergence.*
+
+* Scenario: 200 bodies, each with three colliders at varied offsets and
+  rotations, 500 km from the origin. Mass properties already differed in the
+  last bits between x86_64 Linux and `wasm32-wasip1` right after the colliders
+  were inserted, and the checkpoint hashes diverged from tick 1. With
+  identical hulls, the same scenario happened to match for 7,200 ticks.
+* Root cause: `glamx::DSymmetricEigen3::eigenvalues` calls the C `acos` and
+  `cos` directly (seen in its disassembly). Parry uses it to diagonalise
+  inertia tensors whenever two `MassProperties` with non-zero mass are added,
+  which happens for compound bodies with several colliders.
+* A Linux interposer (the scratch binary defines `acos`, `cos`, `log2`, ... as
+  `+#[unsafe(no_mangle)] extern "C"+` functions that count calls and forward
+  to `libm`) recorded, per 7,200-tick run:
+** several colliders per body: `acos` 800, `cos` 1,600, `log2` 14,398;
+** one compound collider per body with explicit mass properties: `acos` 0,
+   `cos` 0, `log2` 14,398.
+* The `log2` calls come from Parry's `Bvh::optimization_config`
+  (`target_root_node_count.log2()`), every tick. Its inputs depend only on
+  the BVH leaf count. For every leaf count from 1 to 1,048,576, glibc and
+  `libm` `log2` differ for 1,547 counts, but the integer Parry derives from
+  them (`target_optimized_subtree_count`) is identical for all of them.
+
+*The configuration decided below.*
+
+* Configuration: `rapier3d-f64` with `dim3`, `f64`, `alloc` and
+  `enhanced-determinism`; glam 0.33.12 with `f64`, `libm` and `scalar-math`
+  and no `std`; one compound collider with explicit mass properties per body;
+  CCD on half the bodies; planar `LockedAxes`; 50 Parry shape casts per tick;
+  200 bodies at (500 km, 0, 300 km).
+* x86_64 Linux and `wasm32-wasip1` (wasmtime 49.0.2), both release builds,
+  produced byte-identical checkpoint files over 7,200 ticks. The hash
+  included mass properties. `wasm32-unknown-unknown` builds.
+* Windows x86_64 and macOS aarch64 were not run: there are no local hosts.
+  The SPAC-76 CI jobs give the first evidence for them.
+
+*Compiler, std and clippy.*
+
+* rustc 1.99.0 does not contract `a * b + c`. The emitted code is
+  `fmul`/`fadd` on `aarch64-apple-darwin`, `vmulsd`/`vaddsd` on x86_64 with
+  `-C target-cpu=haswell` (FMA available), and `f64.mul`/`f64.add` on
+  wasm32.
+* The 1.99 std documentation says:
+** `min` and `max` may return either input when the inputs are zeros of
+   opposite sign, and `clamp` likewise when the bounds are such zeros;
+** the trigonometric, hyperbolic, exponential and logarithmic functions,
+   `powi`, `powf`, `cbrt`, `hypot`, `to_degrees` and `to_radians` have
+   non-deterministic precision;
+** `sqrt`, `mul_add`, `div_euclid` and `rem_euclid` are guaranteed to return
+   the correctly rounded result.
+* The algebraic float methods (`algebraic_add` and others) are rejected as
+  unstable (E0658) by rustc 1.99.0.
+* `libm` 0.2.16 (MIT) uses architecture-specific code only for exactly
+  rounded operations (`sqrt`, `fma`, `rint`, `ceil`, `floor`, `trunc`,
+  `fabs`). Its `pow(x, 2.0)` returns `x * x`.
+* clippy 0.1.99:
+** A workspace-root `clippy.toml` applies to every member crate.
+** `disallowed-methods` matches inherent primitive methods by paths such as
+   `f64::sin`, `f32::sin_cos`, `f64::min`, `f64::clamp`, `f64::mul_add` and
+   `f64::to_radians`, including calls in `f64::sin(x)` form. It also matches
+   glam methods (`glam::DVec3::mul_add`) and `std::time::Instant::now`.
+** `disallowed-types` matches `std::collections::HashMap`.
+** It warns on a glam path that does not exist in a crate that depends on
+   glam, and stays silent in crates that do not depend on glam.
+** A crate-level
+   `+#![allow(clippy::disallowed_methods, clippy::disallowed_types, reason = "...")]+`
+   opts a crate out. The configuration below was checked against a crate
+   that violates it.
+* FNV-1a 64 test vectors computed: `""` gives `cbf29ce484222325`, `"a"`
+  gives `af63dc4c8601ec8c`, `"foobar"` gives `85944171f73967e8`.
+
+== Decision
+
+=== Sim crates and exempt crates
+
+* *Sim crates* follow every rule in this ADR. They are: `st-sim`, `st-math`,
+  `st-time`, `st-rng`, `st-data` and the determinism harness
+  (`tools/determinism`).
+* A crate is a sim crate if `st-sim` depends on it (normal dependency, at any
+  depth inside the workspace), if its output becomes simulation state, or if
+  it drives the simulation. `st-sim` depends only on sim crates and on
+  dependencies admitted for it.
+* *Exempt crates* are `st-render`, `st-hud`, `st-audio`, `st-materials`,
+  `st-geometry`, `st-game`, `st-platform`, `apps/spacetime-quasar` and
+  `tools/xtask`. Each opts out of the clippy rules below with this line among
+  the crate-level attributes of its `lib.rs` or `main.rs`. Integration tests,
+  benches, examples and build scripts are separate crate roots under
+  `--all-targets`, so each of their root files in an exempt crate carries the
+  line too:
++
+[source,rust]
+----
+#![allow(clippy::disallowed_methods, clippy::disallowed_types, reason = "exempt from PD-06: ADR 0008")]
+----
+* Exempt crates never write simulation state. They read snapshots, and
+  `st-game` changes the simulation only by producing commands. `st-geometry`
+  stays exempt because collider shapes are built from design data in
+  `st-sim`, not from meshes. If it ever feeds colliders, it becomes a sim
+  crate.
+* A sim crate never carries the crate-level opt-out. Item-level
+  `+#[allow(clippy::disallowed_methods, reason = "...")]+` in a sim crate needs
+  a reason naming this ADR and Architect sign-off in review. The only one
+  foreseen is the `log2` domain test below.
+
+=== Software libm and `st_math::det`
+
+* `st-math` depends on `libm = "0.2.16"` with default features. Its
+  architecture paths are exactly rounded, so `force-soft-floats` is not
+  needed.
+* `st_math::det` is the only door to transcendental math in sim crates.
+  Every function takes and returns `f64`:
+** forwarding to `libm`: `sin`, `cos`, `tan`, `sin_cos` (`libm::sincos`),
+   `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`,
+   `atanh`, `exp`, `exp2`, `exp_m1` (`expm1`), `ln` (`log`), `ln_1p`
+   (`log1p`), `log2`, `log10`, `powf` (`pow`), `cbrt`, `hypot`;
+** plain arithmetic, with the exact definitions in the doc comments:
+*** `powi(x, n)`: exponentiation by squaring; for `n < 0` it starts from
+    `1.0 / x`;
+*** `min(a, b) = if b < a { b } else { a }` and
+    `max(a, b) = if b > a { b } else { a }`;
+*** `clamp(x, lo, hi) = if x < lo { lo } else if x > hi { hi } else { x }`,
+    which never panics;
+*** `to_radians(d) = d * (PI / 180.0)` and `to_degrees(r) = r * (180.0 / PI)`;
+** the environment check `fp_env_is_default()` (see below).
+* Golden tests: every `st_math::det` function has at least 16 inputs whose
+  expected outputs are committed as bit patterns. `cargo test` runs them on
+  all four platforms (wasm32 through `wasm32-wasip1`). They catch a `libm`
+  update that changes results, and any platform difference in `libm`.
+* glam's own float functions go through `libm` (feature `libm`,
+  ADR 0006). glam's `std` feature stays off. glamx can still see std
+  through other dependencies, which is why the physics rules below avoid its
+  eigen-solver altogether.
+* `sqrt`, `abs`, `signum`, `copysign`, `floor`, `ceil`, `round`,
+  `round_ties_even`, `trunc`, `fract`, `div_euclid`, `rem_euclid`, `%` and
+  the basic operators are exact or correctly rounded on every target and stay
+  allowed.
+
+=== Clippy configuration
+
+The repository root gets this `clippy.toml`, verified with clippy 0.1.99. It
+applies to every workspace crate; exempt crates opt out as above.
+
+[source,toml]
+----
+# PD-06 determinism rules (ADR 0008). They apply to every workspace crate;
+# crates exempt from PD-06 opt out at their root (ADR 0008, "Sim crates").
+disallowed-methods = [
+    # Platform libm or unspecified precision.
+    { path = "f64::sin", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::cos", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::tan", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::sin_cos", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::asin", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::acos", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::atan", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::atan2", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::sinh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::cosh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::tanh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::asinh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::acosh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::atanh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::exp", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::exp2", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::exp_m1", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::ln", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::ln_1p", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::log", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::log2", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::log10", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::powf", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::powi", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::cbrt", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::hypot", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::abs_sub", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::to_degrees", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f64::to_radians", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::sin", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::cos", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::tan", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::sin_cos", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::asin", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::acos", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::atan", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::atan2", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::sinh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::cosh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::tanh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::asinh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::acosh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::atanh", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::exp", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::exp2", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::exp_m1", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::ln", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::ln_1p", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::log", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::log2", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::log10", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::powf", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::powi", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::cbrt", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::hypot", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::abs_sub", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::to_degrees", reason = "PD-06: platform libm; use st_math::det" },
+    { path = "f32::to_radians", reason = "PD-06: platform libm; use st_math::det" },
+    # Sign of a zero result is unspecified.
+    { path = "f64::min", reason = "PD-06: unspecified zero sign; use st_math::det" },
+    { path = "f64::max", reason = "PD-06: unspecified zero sign; use st_math::det" },
+    { path = "f64::clamp", reason = "PD-06: unspecified zero sign; use st_math::det" },
+    { path = "f32::min", reason = "PD-06: unspecified zero sign; use st_math::det" },
+    { path = "f32::max", reason = "PD-06: unspecified zero sign; use st_math::det" },
+    { path = "f32::clamp", reason = "PD-06: unspecified zero sign; use st_math::det" },
+    # Explicit fused multiply-add and reassociating arithmetic.
+    { path = "f64::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "f64::algebraic_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "f64::algebraic_sub", reason = "PD-06: no FMA or reassociation" },
+    { path = "f64::algebraic_mul", reason = "PD-06: no FMA or reassociation" },
+    { path = "f64::algebraic_div", reason = "PD-06: no FMA or reassociation" },
+    { path = "f64::algebraic_rem", reason = "PD-06: no FMA or reassociation" },
+    { path = "f32::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "f32::algebraic_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "f32::algebraic_sub", reason = "PD-06: no FMA or reassociation" },
+    { path = "f32::algebraic_mul", reason = "PD-06: no FMA or reassociation" },
+    { path = "f32::algebraic_div", reason = "PD-06: no FMA or reassociation" },
+    { path = "f32::algebraic_rem", reason = "PD-06: no FMA or reassociation" },
+    { path = "glam::DVec2::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "glam::DVec3::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "glam::DVec4::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "glam::Vec2::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "glam::Vec3::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "glam::Vec3A::mul_add", reason = "PD-06: no FMA or reassociation" },
+    { path = "glam::Vec4::mul_add", reason = "PD-06: no FMA or reassociation" },
+    # The simulation advances only through ticks and commands.
+    { path = "std::time::Instant::now", reason = "PD-06: no wall clock or threads" },
+    { path = "std::time::SystemTime::now", reason = "PD-06: no wall clock or threads" },
+    { path = "std::thread::spawn", reason = "PD-06: no wall clock or threads" },
+    { path = "std::thread::scope", reason = "PD-06: no wall clock or threads" },
+    { path = "std::thread::Builder::spawn", reason = "PD-06: no wall clock or threads" },
+    { path = "std::thread::Builder::spawn_scoped", reason = "PD-06: no wall clock or threads" },
+]
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "PD-06: unordered or unportable; use BTreeMap, BTreeSet or Vec" },
+    { path = "std::collections::HashSet", reason = "PD-06: unordered or unportable; use BTreeMap, BTreeSet or Vec" },
+    { path = "std::hash::RandomState", reason = "PD-06: unordered or unportable; use BTreeMap, BTreeSet or Vec" },
+    { path = "std::hash::DefaultHasher", reason = "PD-06: unordered or unportable; use BTreeMap, BTreeSet or Vec" },
+]
+----
+
+`clippy::disallowed_methods` and `clippy::disallowed_types` are in clippy's
+default `style` group, so the existing CI gate
+`cargo clippy --workspace --all-targets -- -D warnings` enforces them on
+every target.
+
+=== Physics configuration and how leaks are neutralised
+
+* Rapier features are as in ADR 0007: `dim3`, `f64`, `alloc`,
+  `enhanced-determinism`. `parallel`, `simd8`, `block-solver` and `std` are
+  off.
+* *One collider per body.* Each rigid body has exactly one collider,
+  attached at the body origin (identity position relative to the parent). A
+  ship's hull is one `ColliderBuilder::compound(Vec<(Pose, SharedShape)>)`
+  built from its sections. Sensors and weapon ranges are Parry queries or
+  separate bodies, never a second collider.
+* *Explicit mass properties.* The collider gets
+  `ColliderBuilder::mass_properties(MassProperties::with_principal_inertia_frame(local_com, mass, principal_inertia, principal_inertia_local_frame))`.
+  `st-sim` computes these from design data with `st-math`: closed-form mass
+  and inertia per section shape, parallel-axis sums in `DMat3`, and a Jacobi
+  eigen-solver for symmetric 3 × 3 matrices in `st-math`. The solver uses
+  only addition, subtraction, multiplication, division and `sqrt`, with a
+  fixed sweep schedule.
+* Bodies never use `additional_mass_properties`. Under these rules Parry
+  only ever adds a mass property to a zero one, which returns early, so it
+  never diagonalises. Verified: `acos` and `cos` calls drop to 0. Removing or
+  damaging a section rebuilds the compound and its mass properties in
+  `st-sim`.
+* *Unused Rapier and Parry features.* Sim code does not use joints,
+  multibodies, soft bodies, the character controller, convex decomposition,
+  voxelisation or mesh-intersection utilities. These contain more
+  platform-libm calls. Using one needs an amendment to this ADR after an
+  interposer run.
+* *Accepted residual: Parry's BVH `log2`.* It is called every tick, and its
+  inputs depend only on the leaf count. A test in the harness crate checks,
+  on every CI platform, that for every leaf count from 1 to 1,048,576 the
+  integer Parry derives is the same with the platform `f64::log2` and with
+  `libm::log2`. Any difference fails the build. `st-sim` caps a system world
+  at 1,048,576 colliders.
+* *Leak detector.* On x86_64 Linux only, the harness binary defines the C
+  math symbols itself. Each definition counts its calls and forwards to
+  `libm`, so it catches any third-party call into the platform libm:
+** The symbols are `acos`, `asin`, `atan`, `atan2`, `cos`, `sin`, `tan`,
+   `sincos`, `cosh`, `sinh`, `tanh`, `acosh`, `asinh`, `atanh`, `exp`,
+   `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p`, `pow`, `cbrt`, `hypot`,
+   `fma`, and their `f`-suffixed f32 versions.
+** After the scenarios, the harness prints the counts. If any symbol
+   outside the allow-list was called, it exits with status 3.
+** The allow-list starts as `log2` (Parry's BVH, covered by the domain test)
+   and `fma`/`fmaf` (correctly rounded on every platform). Each entry carries
+   its reason in the source.
+** The module needs `+#[unsafe(no_mangle)]+`, and raw-pointer writes for
+   `sincos`. This ADR approves `+#[allow(unsafe_code)]+` on that module only,
+   with `// SAFETY:` comments stating that each signature matches the C
+   declaration exactly.
+* *Upstream.* The method-resolution issue should be reported to Dimforge
+  (glamx, Parry, Rapier). The fix is to call `ComplexField` functions in
+  UFCS form in `enhanced-determinism` builds. When a fixed release is
+  adopted, the allow-list shrinks. The one-collider rule stays, because it
+  also keeps mass properties under our control.
+
+=== FMA, compiler flags and the floating-point environment
+
+* rustc never contracts multiplications and additions into FMA (verified on
+  all three instruction sets). Sim crates do not call `mul_add` (clippy).
+* No committed configuration, CI environment, flake or documented command
+  sets `-C target-cpu` or `-C target-feature` for any target. ADR 0003 and
+  ADR 0004 already forbid `target-cpu=native`. In particular, `+fma` would
+  switch `wide`'s and `libm`'s FMA paths on x86, and wasm `+relaxed-simd`
+  makes SIMD results implementation-defined. The CI determinism steps run
+  with `RUSTFLAGS` unset.
+* Rust has no fast-math mode. The algebraic float methods are listed in
+  `clippy.toml` so that their stabilisation cannot open a gap. All four
+  producers build the harness with the same profile (`release`). The debug
+  build must agree, which the reference test below checks.
+* The floating-point environment is round-to-nearest-even, with no
+  flush-to-zero and no denormals-are-zero.
+** Sim crates never change it; that would need `unsafe`.
+** The game runs simulation steps on a thread provided by `st-platform`.
+   That thread never calls into GPU drivers, audio back-ends or other native
+   libraries that could change it. On wasm32 the environment is fixed.
+** `st_math::det::fp_env_is_default()` checks it with `core::hint::black_box`
+   operands:
+*** `f64::MIN_POSITIVE * 0.5` has bits `0x0008_0000_0000_0000` (no
+    flush-to-zero);
+*** `1.0 + 0.75 * f64::EPSILON == 1.0 + f64::EPSILON`;
+*** `-1.0 - 0.75 * f64::EPSILON == -1.0 - f64::EPSILON`.
+** Only round-to-nearest satisfies both rounding checks. `st-sim` calls
+   this check at the start of every step and returns an error instead of
+   stepping when it fails.
+
+=== Iteration order and data structures
+
+* No `HashMap`, `HashSet`, `RandomState` or `DefaultHasher` in sim crates
+  (clippy). Keyed data uses `BTreeMap` and `BTreeSet`; entities live in
+  `Vec`s or `BTreeMap`s keyed by stable ids.
+* Every id (entity, pilot, system, command sequence) is a `u64`, allocated
+  from counters that are part of the simulation state.
+* Every loop that changes state iterates in ascending id order. Rapier's
+  sets iterate in arena order, which is deterministic but is not our
+  canonical order, so simulation systems iterate their own id-ordered
+  collections.
+* Floats are sorted with `f64::total_cmp`, with ties broken by id, so no
+  result depends on whether a sort is stable.
+* Simulation state, hashes and serialised data contain no `usize` or
+  `isize`: `usize` is 32 bits on wasm32. Fixed-width integers are used, and
+  integer overflow is handled explicitly (`checked_`, `wrapping_` or
+  `saturating_` operations) where it can happen.
+* Anything that enumerates files, directories or other OS-ordered
+  collections sorts by a stable key before the result reaches the
+  simulation (`st-data`).
+* `std::hash::Hash` and `Hasher` are never used for simulation-visible
+  decisions or for the state hash: they write `usize` lengths at platform
+  width.
+
+=== Parallelism and SIMD
+
+* A simulation tick runs on one thread. Rapier's `parallel` feature is off,
+  `rayon` is not a dependency of any sim crate, and thread creation is banned
+  in sim crates (clippy). The simulation as a whole may run on a different
+  thread from rendering (see above).
+* Parallelism inside a tick needs a superseding ADR. The expected rules are
+  a fixed partition by id, results merged in id order, and no floating-point
+  reduction across tasks.
+* Sim crates contain no explicit SIMD: no `core::arch` or `std::arch`, and
+  no portable SIMD. glam runs with `scalar-math`. Rapier's internal 4-lane
+  SIMD is accepted: it is lane-wise, and its only fused operation
+  (`simd_mul_add`) is not called by the versions in use (re-checked on every
+  upgrade, see Consequences).
+
+=== Time and randomness
+
+* The simulation steps at a fixed 120 Hz. The tick counter is a `u64`, and
+  `DT: f64 = 1.0 / 120.0` is a `const`. Sim crates never read a clock
+  (clippy); `st-time` receives elapsed real time as input from `st-platform`
+  and turns it into a number of ticks.
+* `st-rng` has an integer-only core and is stateless. Each value is derived
+  from the world seed (`u64`) and explicit words: purpose tag, tick, entity
+  id and draw index. The `st-rng` implementation PR picks the mixing
+  algorithm and commits test vectors. The algorithm is frozen once replays
+  exist; changing it changes the simulation version.
+* Floats are produced as `(x >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0)`,
+  which is exact and lies in [0, 1). The `rand` crate's `StdRng` is not used:
+  its algorithm may change between releases.
+
+=== State hash
+
+* *Algorithm.* FNV-1a 64, offset basis `0xcbf2_9ce4_8422_2325`, prime
+  `0x0000_0100_0000_01b3`, over a canonical byte stream. It is implemented in
+  `st-sim` with no dependency. Test vectors: `""` gives `cbf29ce484222325`,
+  `"a"` gives `af63dc4c8601ec8c`, `"foobar"` gives `85944171f73967e8`, and
+  the f64 sequence (1.0, −0.0, 2.5) encoded by the rules below gives
+  `bd93cddf232ec51c`.
+* *Canonical encoding.*
+** Integers are little-endian at fixed width; `bool` is one byte, 0 or 1.
+** An `f64` is encoded as `to_bits()` in little-endian, after mapping `-0.0`
+   to `+0.0`. A NaN anywhere is an error (`HashError::NotANumber`), not a
+   value. Infinities are encoded as they are.
+** `DVec3` is x, y, z; `DQuat` is x, y, z, w (glam's storage order, no sign
+   normalisation).
+** A sequence is a `u64` count followed by its elements in canonical order.
+   An `Option` is a tag byte, 0 or 1, followed by the value. An enum is an
+   explicit `u32` tag from a table in code (never `as` on an enum without
+   explicit discriminants), followed by its payload.
+** Each section starts with a 4-byte ASCII tag.
+* *Contents, format version 1:*
+. `STQH`, format version `u32` = 1, tick `u64`, world seed `u64`.
+. `ENTS`: the entity count, then each entity in ascending entity id:
+.. entity id;
+.. system id;
+.. an optional body block, read through Rapier's API: `translation`,
+   `rotation`, `linvel`, `angvel`, `locked_axes().bits()` (`u8`),
+   `is_sleeping()`, `is_ccd_enabled()`, and the local mass properties
+   (`inv_mass`, `local_com`, `inv_principal_inertia`,
+   `principal_inertia_local_frame`);
+.. a component count, then each component in ascending `u32` tag order:
+   the tag, then the component's own encoding.
+. `PILT`: the pilot count, then each pilot in ascending pilot id: the
+  pilot id, the controlled entity (`Option<u64>`), the sequence number of the
+  last applied command, then pilot components as above.
+. `GLOB`: simulation-wide state (economy, factions, missions), added by the
+  PRs that introduce it. Random numbers add nothing beyond the seed.
+* The format version changes only when the encoding rules change. New state
+  changes the hashes, and therefore the reference file, but not the
+  version.
+* *Excluded:* Rapier's internal caches (contact manifolds, warm-start
+  impulses, broad-phase tree, islands), anything derived and recomputable,
+  and all render, audio, UI and wall-clock data. A divergence in a cache
+  shows up in the body state at a later checkpoint.
+* *API.* `st-sim` exposes `StateHasher` (`u8`, `u32`, `u64`, `i64`, `f64`,
+  `bool`, `bytes`, `vec3`, `quat` writers) and
+  `trait StateHash { fn state_hash(&self, h: &mut StateHasher) -> Result<(), HashError>; }`.
+  `Sim::state_hash(&self) -> Result<u64, HashError>` hashes the whole state.
+  It is not `std::hash::Hasher`, and `+#[derive(Hash)]+` is never used for it.
+* *Checkpoints.* Tick 0 is the state after setup, before the first step.
+  Hashes are taken every 120 ticks (1 s) and at the final tick.
+
+=== Determinism harness (SPAC-76)
+
+* *Package.* `determinism` in `tools/determinism/`, `publish = false`, with a
+  library and a binary. It is a sim crate. It depends on `st-sim` (and
+  through it `st-math`, `st-rng`, `st-time`), on `st-data` for the fixtures
+  and on `libm` for the detector.
+* *Command line.*
+** `determinism --out <path> [--scenario <name>] [--checkpoint-every <n>]`
+   runs all scenarios, or one, and writes the result file.
+   `--checkpoint-every` (default 120) helps localise a divergence; CI never
+   changes it.
+** `--dump-tick <t> --dump <path>` additionally writes the canonical
+   hash-input bytes at tick `t` as hex, one line per section and entity, so
+   that two platforms can be diffed.
+** Exit status: 0 success, 1 usage or I/O error, 2 `HashError`, 3 leak
+   detected.
+* *Output.* The ADR 0003 format: one line per checkpoint,
+  `<scenario> <tick> <hash>`. The tick is zero-padded to 8 digits and the
+  hash is 16 lowercase hex digits, so byte order equals the intended order.
+  Lines are sorted, LF-terminated, with a final newline.
+* *Scenario `physics-swarm` (Phase 1)* is the probe above made permanent:
+** 200 ships at least 500 km from the system origin;
+** each a single compound collider of three or more varied parts with
+   explicit mass properties;
+** planar `LockedAxes`, CCD on every other ship;
+** thrust and yaw impulses from `st-rng`;
+** 50 Parry shape casts per tick (projectile sweeps);
+** 7,200 ticks (60 s).
+* *Scenario `math-kernels` (Phase 1)* feeds `st-rng`-derived inputs through
+  every `st_math::det` function, the orbit and Kepler helpers and the
+  interpolation helpers, and folds the results into the hash (1,200 ticks).
+* *Scenario `data-fixtures` (Phase 1)* loads the `st-data` golden fixtures
+  (ADR 0010) as one data set and emits a single line at tick 0. Its hash is
+  FNV-1a 64 of the 32-byte data-set hash, so a platform difference in data
+  loading fails the same comparison as a simulation difference.
+* *Scenario `combat-60s`* is the charter's acceptance test, added once
+  `st-sim` has pilots, weapons and damage: N pilots fighting for 60 s with AI,
+  driven by a seed and a command log (an ADR 0009 file once that exists).
+* *Reference file.* `tools/determinism/reference.txt` holds the expected
+  output, generated by the Linux harness. A PR that changes simulation
+  behaviour on purpose regenerates it and says why in its description.
+* *Tests run by `cargo test` on every platform (wasm32 through
+  `wasm32-wasip1`).*
+** `reference_prefix` runs every scenario to tick 600 in the test (debug)
+   build and compares those lines with the reference file (included with
+   `include_str!`).
+** `parry_bvh_log2_domain` is the exhaustive leaf-count test above. Its
+   function carries
+   `+#[allow(clippy::disallowed_methods, reason = "compares platform log2 with libm: ADR 0008")]+`.
+* *Leak detector.* A module of the binary target only, compiled on
+  `cfg(all(target_os = "linux", target_arch = "x86_64"))`. Tests and other
+  platforms behave like the game.
+* *CI steps, fitting ADR 0003.*
+** `test (linux-x86_64)`:
++
+[source,sh]
+----
+cargo run --release --locked -p determinism -- --out determinism-linux-x86_64.txt
+diff -u tools/determinism/reference.txt determinism-linux-x86_64.txt
+----
++
+then upload `determinism-linux-x86_64`.
+** `test (windows-x86_64)` and `test (macos-aarch64)`: the same `cargo run`
+   with their file names, then upload.
+** `wasm32`: install wasmtime, pinned to the nixpkgs version (49.0.2 today),
+   then:
++
+[source,sh]
+----
+export CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=."
+cargo test --locked --target wasm32-wasip1 -p st-math -p st-rng -p st-time -p st-sim -p st-data -p determinism
+cargo run --release --locked --target wasm32-wasip1 -p determinism -- --out determinism-wasm32.txt
+----
++
+then upload `determinism-wasm32`.
+** The `determinism` compare job and the `determinism` flake check are as
+   in ADR 0003. `determinism` becomes a required check after its first green
+   run on `main`.
+* *Budget.* Measured on the probe: `physics-swarm` takes 1.5 to 1.7 s
+  natively and 3.4 to 5.3 s under wasmtime (release). The whole harness
+  should stay under 30 s per platform, excluding build time.
+
+=== What ADR 0009 plugs into
+
+* *Stepping.* `st-sim` exposes `Sim::new(setup, seed: u64)`,
+  `Sim::step(&mut self, commands: &[Command]) -> Result<(), StepError>`
+  (exactly one tick), `Sim::tick() -> u64` and `Sim::state_hash()`.
+  ADR 0009 defines `Command` and how it is stored.
+* *Tick semantics.* `state(t + 1) = step(state(t), commands stamped t)`.
+  Within a tick, commands apply first, in ascending (pilot id, per-pilot
+  sequence number) order, before AI and physics.
+* *Command values.* A command carries exactly what the simulation consumes:
+  integers, or f64 stored bit-exact. Analog input is quantised by the input
+  source before it becomes a command, so replays never depend on device
+  processing.
+* *Seed.* One `u64` world seed per session. All randomness derives from it
+  through `st-rng`; there is no other entropy.
+* *Verification.* Replay files can embed `(tick, hash)` pairs at the
+  120-tick checkpoints, using the state hash defined here (format version 1).
+  The harness accepts replay files as scenarios once ADR 0009 exists. When
+  the game binary gains a headless replay mode, the `determinism` job also
+  runs replays through it, which covers feature-unification differences
+  between the harness and the game.
+* *Version binding.* Bit-identity holds across platforms for one build (the
+  same `Cargo.lock` and toolchain), not across builds. A replay header
+  records the hash format version, a simulation version and the ADR 0010
+  data-set hash of the content it ran on.
+* *Snapshots.* If ADR 0009 adds snapshots (saves, seeking), restoring one
+  must reproduce everything a step reads, including Rapier's internal caches.
+  Otherwise a restored run diverges from an uninterrupted one. Its test is:
+  run, snapshot, restore, continue, and compare the checkpoint hashes with
+  the uninterrupted run. Rapier's `serde-serialize` feature, not admitted
+  yet, is the candidate.
+
+=== Exempt: the renderer and other presentation code
+
+Rendering, HUD, audio, materials, geometry, game glue, platform code, the
+application and tools are exempt (list above). They may use the platform
+libm, hash maps, threads and SIMD. Interpolation for display, camera motion,
+particles and post effects need not be deterministic. Exempt code never
+writes simulation state and influences it only through commands.
+
+=== Dependencies admitted
+
+Register row for ADR 0002, added in the PR that first adds the dependency:
+
+[cols="2,2,2,5",options="header"]
+|===
+| Crate | Requirement | Admitted for | Notes
+
+| `libm`
+| `0.2.16`
+| Phase 1, `st-math` and `tools/determinism` (ADR 0008)
+| Default features. Software math for `st_math::det`; the harness leak
+  detector forwards to it. A version change goes with an updated golden test
+  and reference file.
+|===
+
+== Alternatives considered
+
+Rely on `enhanced-determinism` alone::
+  Disproved: platform libm calls remain in glamx and Parry through method
+  resolution, and a multi-collider scenario diverged between x86_64 and
+  wasm32 from tick 1.
+A process-wide interposer for every binary that runs the simulation::
+  It would route all platform math to `libm` in the game too. But it needs
+  `unsafe` exported symbols in shipped code, depends on per-platform linker
+  behaviour (unverified on Windows and macOS), and makes rendering and audio
+  pay for software math. Kept as the escalation path if a leak cannot be
+  avoided or tested away.
+Vendored, patched glamx, Parry or Rapier through `[patch.crates-io]` path dependencies::
+  It works, but every upgrade means re-applying patches. Also an escalation
+  path, by superseding ADR.
+Per-crate `clippy.toml` (sim crates opt in)::
+  Clippy configuration files do not merge, so the list would be duplicated
+  in every sim crate, and a new crate would start unprotected. A root file
+  with an explicit opt-out fails safe.
+A wrapper float type exposing only allowed operations::
+  Heavy, and it fights glam and Rapier. Clippy enforces the same rule
+  without new types.
+BLAKE3 (admitted for content hashes by ADR 0010) or `xxh3` for the state hash::
+  Stronger or faster, but either adds a dependency to `st-sim`, and BLAKE3's
+  256-bit output buys nothing for desync detection. At one hash per second
+  FNV-1a is cheap. It is fully specified, and for two inputs of equal length
+  that differ in one byte its result always differs.
+`+#[derive(Hash)]+` with a `std::hash::Hasher`::
+  Writes `usize` lengths at platform width (32 bits on wasm32), and its
+  encoding is not specified.
+Hashing every tick::
+  More output for no gain. `--checkpoint-every 1` exists for localising a
+  divergence.
+`libm` with `force-soft-floats`::
+  Not needed: `libm`'s architecture paths are all exactly rounded
+  operations.
+
+== Consequences
+
+* Ship physics is one compound collider per body, and `st-sim` owns the
+  mass model (section masses and inertias, plus an eigen-solver in
+  `st-math`). Section-level hits are identified by the compound part index.
+* *Upgrade checklist.* Any `Cargo.lock` change to `rapier3d-f64`,
+  `parry3d-f64`, `glamx`, `glam`, `simba`, `wide`, `nalgebra`, `num-traits`
+  or `libm` runs the harness with the leak detector and regenerates the
+  reference if results changed. It also re-searches the new Rapier, Parry
+  and glamx sources for `mul_add` and `simd_mul_add`, and checks that glam
+  still matches glamx's requirement.
+* The harness module that interposes C symbols is the project's first
+  `unsafe` code. It is Linux-only, scoped to one module and approved here.
+* CI gains a few seconds of harness time per platform, plus the release
+  build of the harness on each producer.
+* Windows and macOS determinism is unverified until SPAC-76 runs in CI. If
+  they diverge, the same investigation applies there (`nm -u` on macOS,
+  `dumpbin /imports` on Windows, then the `--dump-tick` diff).
+* *Product question (for ADR 0009, not decided here):* must replays and
+  saves made with one game version play back in later versions? If yes,
+  simulation behaviour, including every dependency update above, has to be
+  frozen or versioned. This ADR guarantees bit-identity only within one
+  build.
+* Revisit when Dimforge fixes the method-resolution leak, when a detector
+  run finds a new leak, or if the single-threaded tick becomes a performance
+  limit.
+
+== References
+
+* PD-04 and PD-06 in `docs/decisions/`
+* Rapier: https://crates.io/crates/rapier3d-f64; Parry: https://crates.io/crates/parry3d-f64;
+  glamx: https://crates.io/crates/glamx; simba: https://crates.io/crates/simba;
+  wide: https://crates.io/crates/wide; libm: https://crates.io/crates/libm
+* Rust `f64` documentation (precision notes): https://doc.rust-lang.org/std/primitive.f64.html
+* clippy `disallowed_methods`: https://rust-lang.github.io/rust-clippy/master/index.html#disallowed_methods
+* FNV hash: https://datatracker.ietf.org/doc/draft-eastlake-fnv/
+* WebAssembly NaN non-determinism: https://webassembly.github.io/spec/core/exec/numerics.html#nan-propagation
+* xref:0002-dependency-policy.adoc[ADR 0002], xref:0003-ci-design.adoc[ADR 0003],
+  xref:0004-build-resources.adoc[ADR 0004], xref:0006-math-library-boundary.adoc[ADR 0006],
+  xref:0007-large-world-coordinates.adoc[ADR 0007], xref:0010-data-schema-versioning.adoc[ADR 0010]
+* Jira: SPAC-105, SPAC-76

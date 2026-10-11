@@ -43,6 +43,11 @@ in the same commit.
 | Accepted
 | 2026-10-11
 
+| xref:0008-determinism-implementation.adoc[0008]
+| Determinism implementation
+| Accepted
+| 2026-10-11
+
 | xref:0010-data-schema-versioning.adoc[0010]
 | Data schema versioning, migration, content hashing and hot reload
 | Accepted
