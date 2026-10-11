@@ -1,0 +1,22 @@
+= PD-32: System edge: no boundary
+:description: Product decision PD-32
+
+* *Date:* 2026-10-11
+* *Resolves:* the system-edge question listed in xref:../adr/0007-large-world-coordinates.adoc[ADR 0007]
+
+*Context.* ADR 0007 assumed a soft boundary (warning, then slowing or push-back) so that a ship never reaches the validity bound of the coordinates.
+
+*Decision.*
+
+* A system has no boundary: no wall, no soft push-back and no warning.
+* The player may fly away from the system indefinitely.
+
+*Alternatives considered.*
+
+* Soft boundary with warning and slowing: rejected by the owner.
+* Hard wall: rejected.
+
+*Consequences.*
+
+* Precision far from the origin is an engineering concern, handled by the f64 simulation and the `RenderOrigin` of xref:../adr/0007-large-world-coordinates.adoc[ADR 0007]. It is not a gameplay limit.
+* The ADR 0007 assumption of a soft boundary no longer applies.

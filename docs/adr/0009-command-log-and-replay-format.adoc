@@ -7,6 +7,7 @@ toc::[]
 
 Accepted. The replay version policy (version-locked replays) is an
 assumption pending owner confirmation; see <<product-questions>>.
+Update 2026-10-11: PD-33 confirms version-locked replays and makes them player-facing in the MVP.
 
 == Date
 

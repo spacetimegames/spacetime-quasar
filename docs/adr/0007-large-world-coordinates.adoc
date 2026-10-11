@@ -364,6 +364,8 @@ A different answer may need this ADR revisited.
   play back only in the simulation version that recorded them (ADR 0008),
   while saves are upgrade-safe per ADR 0010.
 
+Update 2026-10-11: PD-31 (speed envelope, provisional), PD-32 (no system edge, replacing the soft-boundary assumption) and PD-33 (replays) answer the items above.
+
 == References
 
 * PD-01, PD-04, PD-06, PD-10, PD-11 and PD-26 in `docs/decisions/`
