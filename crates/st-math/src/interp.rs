@@ -104,10 +104,13 @@ fn blend(a: DQuat, b: DQuat, wa: f64, wb: f64, flip: bool) -> DQuat {
 
 /// Normalised linear interpolation of two unit quaternions along the shorter arc.
 ///
-/// Cheaper than [`slerp`] and exact at both ends, but the angular speed is not constant:
-/// it is fastest in the middle of the arc, and the difference grows with the angle between
-/// the two rotations. Use it for small steps such as per-tick smoothing; use [`slerp`]
+/// Cheaper than [`slerp`], but the angular speed is not constant: it is fastest in the middle
+/// of the arc, and the difference grows with the angle between the two rotations. Use it for small steps such as per-tick smoothing; use [`slerp`]
 /// where constant angular speed matters.
+///
+/// With `t = 0` the result is `a` normalised, and with `t = 1` it is `b` normalised (negated
+/// when `dot(a, b) < 0`). Normalising a unit quaternion can change the last bit, so the
+/// endpoints are the inputs up to that rounding, not bit for bit.
 ///
 /// `b` is negated first when `dot(a, b) < 0`, because `q` and `-q` are the same rotation.
 /// The result is normalised; if the blend has zero, `NaN` or infinite length (for example
@@ -139,6 +142,9 @@ pub fn nlerp(a: DQuat, b: DQuat, t: f64) -> DQuat {
 /// `theta = acos(|dot|)`, evaluated with [`det`]. The result is normalised with
 /// the same fallback as [`nlerp`]: [`DQuat::IDENTITY`] for a degenerate blend or `NaN`
 /// input.
+///
+/// At `t = 0` and `t = 1` the result is the first or second rotation up to rounding (it can
+/// differ from a unit input in the last bit, and `b` can come back negated), not bit for bit.
 ///
 /// ```
 /// use st_math::{glam::DQuat, interp::slerp};

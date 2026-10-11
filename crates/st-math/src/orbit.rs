@@ -272,13 +272,17 @@ fn from_world(v: DVec3) -> DVec3 {
 /// order of floating-point operations never depends on the data.
 ///
 /// Convergence bound: Newton's method is quadratic near the root, and the start is within
-/// `e` of it. Measured with a copy of this loop on a grid of 4,001 mean anomalies in
-/// `[0, pi]` plus values down to `1e-30`, for nine eccentricities from `0` to `0.999`, the
-/// residual `|E - e sin E - M|` was `4.4e-16` (rounding noise) after 12 steps and not larger
-/// after more, while 8 steps left `6.7e-6`. The budget of 24 is twice the steps that grid
-/// needed. `tests/orbit.rs` checks a residual below `2e-15` on pseudo-random inputs with
-/// the real function. This is an empirical statement over those inputs, not a proof for
-/// every `f64`.
+/// `e` of it. The test `kepler_residual_grid` in `tests/orbit.rs` checks the residual
+/// `|E - e sin E - M|` on a deterministic grid: nine eccentricities from `0` to `0.999`
+/// (both included), 4,001 evenly spaced mean anomalies over `[0, pi]` with their mirror
+/// images over `[pi, 2*pi]`, and corner values (tiny down to `1e-30`, zero, around `pi`,
+/// around `2*pi`, negative, a thousand radians out). It asserts a residual below `1e-14`
+/// for the real function with [`KEPLER_ITERATIONS`] steps, and below the same bound for a
+/// test-local copy of the loop with only 12 steps, so the budget of 24 is twice what that
+/// grid needs. The residual is measured against `M` reduced modulo `TAU`: `TAU` is `2*pi`
+/// rounded, so the reduction itself is off by about `2.4e-16` radians per turn of `|M|`,
+/// which the caller can avoid by keeping `M` small. The statement is empirical over that
+/// grid, not a proof for every `f64`.
 ///
 /// # Errors
 ///

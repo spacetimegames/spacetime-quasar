@@ -83,7 +83,6 @@ fn kepler_solver_symmetry_and_special_values() {
     let e = solve_kepler(1.0, 0.8).unwrap();
     let mirrored = solve_kepler(TAU - 1.0, 0.8).unwrap();
     assert!((e + mirrored - TAU).abs() < 1e-15);
-    const { assert!(KEPLER_ITERATIONS >= 12) };
 }
 
 #[test]
@@ -536,4 +535,75 @@ fn errors_have_messages() {
     for err in all {
         assert!(!err.to_string().is_empty());
     }
+}
+
+/// A test-local copy of the `solve_kepler` loop with a chosen number of steps, used only to
+/// show how many steps are needed. `kepler_residual_grid` checks that the copy with
+/// `KEPLER_ITERATIONS` steps equals the real function bit for bit, so the copy cannot drift.
+fn kepler_with_steps(mean_anomaly: f64, e: f64, steps: u32) -> f64 {
+    let m_wrapped = mean_anomaly.rem_euclid(TAU);
+    let mirrored = m_wrapped > PI;
+    let m = if mirrored { TAU - m_wrapped } else { m_wrapped };
+    let mut big_e = det::min(m + e, PI);
+    for _ in 0..steps {
+        let (s, c) = det::sin_cos(big_e);
+        big_e -= (big_e - e * s - m) / (1.0 - e * c);
+    }
+    let big_e = det::clamp(big_e, 0.0, PI);
+    if mirrored { TAU - big_e } else { big_e }
+}
+
+/// Residual `|E - e sin E - M|` of a candidate solution, against `M` reduced modulo a full turn
+/// the way the solver reduces it (`rem_euclid` with `TAU`). The reduction itself is not part of
+/// the residual: `TAU` is `2*pi` rounded, so a mean anomaly many turns from zero is off by
+/// about `2.4e-16` radians per turn before the solver sees it.
+fn kepler_residual(big_e: f64, e: f64, m: f64) -> f64 {
+    angle_gap(big_e - e * det::sin(big_e), m.rem_euclid(TAU))
+}
+
+/// The bound quoted in the documentation of `solve_kepler`.
+const KEPLER_RESIDUAL_BOUND: f64 = 1e-14;
+
+/// The deterministic grid behind the convergence statement in the `solve_kepler`
+/// documentation: nine eccentricities from 0 to 0.999 (both included), 4,001 evenly spaced
+/// mean anomalies over `[0, pi]` and their mirror images over `[pi, 2*pi]`, plus corner
+/// values: tiny (down to 1e-30), zero, around `pi`, around `2*pi`, and negative.
+#[test]
+fn kepler_residual_grid() {
+    let eccentricities = [0.0, 0.1, 0.5, 0.8, 0.9, 0.95, 0.99, 0.995, MAX_ECCENTRICITY];
+    let mut anomalies: Vec<f64> = Vec::new();
+    for k in 0..=4000 {
+        let m = PI * f64::from(k) / 4000.0;
+        anomalies.push(m);
+        anomalies.push(TAU - m);
+    }
+    for tiny in [1e-30, 1e-20, 1e-12, 1e-9, 1e-6, 1e-3] {
+        anomalies.extend([tiny, -tiny, TAU - tiny, TAU + tiny, PI - tiny, PI + tiny]);
+    }
+    anomalies.extend([0.0, -0.0, PI, TAU, -TAU, 2.0 * TAU + 1e-9, 1000.0, -1000.0]);
+
+    let (mut worst_real, mut worst_12) = (0.0f64, 0.0f64);
+    for &e in &eccentricities {
+        for &m in &anomalies {
+            let real = solve_kepler(m, e).unwrap();
+            let at_budget = kepler_with_steps(m, e, KEPLER_ITERATIONS);
+            assert_eq!(
+                real.to_bits(),
+                at_budget.to_bits(),
+                "copy differs at M={m}, e={e}"
+            );
+            worst_real = det::max(worst_real, kepler_residual(real, e, m));
+            worst_12 = det::max(worst_12, kepler_residual(kepler_with_steps(m, e, 12), e, m));
+        }
+    }
+    assert!(
+        worst_real < KEPLER_RESIDUAL_BOUND,
+        "24 steps: worst residual {worst_real:e}"
+    );
+    assert!(
+        worst_12 < KEPLER_RESIDUAL_BOUND,
+        "12 steps: worst residual {worst_12:e}"
+    );
+    // The documented budget is at least the 12 steps shown to suffice.
+    const { assert!(KEPLER_ITERATIONS >= 12) };
 }

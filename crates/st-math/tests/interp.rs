@@ -67,7 +67,7 @@ fn lerp_hits_both_ends_exactly() {
 }
 
 #[test]
-fn nlerp_and_slerp_are_exact_at_the_ends_and_unit_length() {
+fn nlerp_and_slerp_reach_both_ends_up_to_rounding_and_are_unit_length() {
     let mut rng = Rng(11);
     for _ in 0..1000 {
         let (a, b) = (rng.unit_quat(), rng.unit_quat());
