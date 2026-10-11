@@ -306,3 +306,83 @@ fn a_standing_problem_survives_another_files_good_edit_until_its_own_file_loads(
     assert_eq!(hot.generation(), 1);
     assert_eq!(thrust(&hot, "b.ron"), 9.75);
 }
+
+/// A file removed while it has a problem keeps a `missing-source` problem
+/// (its last value is still in use) and recovers when created again.
+#[test]
+fn a_file_removed_while_in_error_and_created_again_valid_recovers() {
+    let dir = TempDir::new("remove-in-error");
+    write(&dir.0, "1.5");
+    let mut hot = open(&dir.0);
+    let clock = Clock::new();
+
+    write(&dir.0, "-3.0");
+    wait_until(&mut hot, &clock, |r| r.error.is_some());
+    std::fs::remove_file(dir.0.join("main.ron")).unwrap();
+    let report = wait_until(&mut hot, &clock, |r| r.error.is_some());
+    assert_eq!(
+        report.error.unwrap().diagnostics()[0].code.as_str(),
+        "missing-source"
+    );
+    let standing = hot.standing_error().expect("the removal stands");
+    assert_eq!(standing.diagnostics().len(), 1);
+    assert_eq!(standing.diagnostics()[0].code.as_str(), "missing-source");
+    assert_eq!(thrust(&hot, "main.ron"), 1.5);
+
+    write(&dir.0, "8.25");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert_eq!(report.recovered, ["main.ron"]);
+    assert_eq!(report.reloaded.expect("new value").generation, 1);
+    assert!(hot.standing_error().is_none());
+    assert_eq!(thrust(&hot, "main.ron"), 8.25);
+}
+
+#[test]
+fn an_error_followed_by_a_different_valid_edit_recovers_and_reloads() {
+    let dir = TempDir::new("error-then-other");
+    write(&dir.0, "1.5");
+    let mut hot = open(&dir.0);
+    let clock = Clock::new();
+
+    write(&dir.0, "-3.0");
+    wait_until(&mut hot, &clock, |r| r.error.is_some());
+    assert!(hot.standing_error().is_some());
+
+    write(&dir.0, "20.5");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert_eq!(report.recovered, ["main.ron"]);
+    assert_eq!(report.reloaded.expect("new value").generation, 1);
+    assert!(report.error.is_none());
+    assert!(hot.standing_error().is_none());
+    assert_eq!(thrust(&hot, "main.ron"), 20.5);
+}
+
+/// Good A and bad B saved together: nothing lands. When B is fixed later, A
+/// lands with it and only B is reported as recovered.
+#[test]
+fn a_mixed_batch_lands_together_once_the_bad_file_is_fixed() {
+    let dir = TempDir::new("mixed-batch");
+    write_file(&dir.0, "a.ron", "1.5");
+    write_file(&dir.0, "b.ron", "2.5");
+    let mut hot = open(&dir.0);
+    let clock = Clock::new();
+
+    write_file(&dir.0, "a.ron", "11.25");
+    write_file(&dir.0, "b.ron", "-1.0");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert!(report.reloaded.is_none());
+    assert_eq!(report.error.unwrap().diagnostics()[0].source, "b.ron");
+    assert_eq!(thrust(&hot, "a.ron"), 1.5);
+    assert_eq!(hot.standing_error().unwrap().diagnostics().len(), 1);
+
+    write_file(&dir.0, "b.ron", "33.75");
+    let report = wait_until(&mut hot, &clock, |_| true);
+    assert_eq!(report.recovered, ["b.ron"]);
+    let reloaded = report.reloaded.expect("both land");
+    assert_eq!(reloaded.generation, 1);
+    let names: Vec<&str> = reloaded.events.iter().map(|e| e.source.as_str()).collect();
+    assert_eq!(names, ["a.ron", "b.ron"]);
+    assert_eq!(thrust(&hot, "a.ron"), 11.25);
+    assert_eq!(thrust(&hot, "b.ron"), 33.75);
+    assert!(hot.standing_error().is_none());
+}

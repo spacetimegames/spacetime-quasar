@@ -56,9 +56,15 @@
 //!   [`ReloadReport::recovered`], **even if its content is identical to the
 //!   value already in use**: the usual "bad edit, then undo" changes nothing in
 //!   the snapshot, but it does end the problem. The report is returned for that
-//!   alone, so a caller that shows the problem can stop showing it. A file that
-//!   was never loaded and is then removed has its problem dropped silently:
-//!   there is no value for it to be about.
+//!   alone, so a caller that shows the problem can stop showing it.
+//! * What a removal does to a standing problem. A file that had a value and is
+//!   removed (whatever its earlier problem was) keeps a `missing-source`
+//!   problem **until the path is created again**, then it recovers like any
+//!   other. This is kept, not cleared, on purpose: the removed file's last value
+//!   is still in use (ADR 0010), and clearing the problem would tell a caller
+//!   that all is well while a file the game depends on is gone. A file that was
+//!   never loaded and is then removed has its problem dropped silently: there is
+//!   no value in use for it to be about.
 
 use st_data::{Code, ContentHash, Diagnostic, Loaded, Loader, Schema, Validate};
 use st_platform::{
@@ -210,6 +216,48 @@ impl Error for ReloadError {}
 /// }
 /// # let _ = log;
 /// ```
+///
+/// A file that was wrong and is valid again is listed in `recovered`, even
+/// when its content equals the value in use (then nothing else is reported):
+///
+/// ```
+/// # let dir = std::env::temp_dir().join(format!("st-game-doc-recovered-{}", std::process::id()));
+/// # std::fs::create_dir_all(&dir).unwrap();
+/// # let good = r#"(kind: "n", version: 1, data: (v: 1))"#;
+/// # std::fs::write(dir.join("a.ron"), good).unwrap();
+/// # use serde::{Deserialize, Serialize};
+/// # #[derive(Serialize, Deserialize)] #[serde(deny_unknown_fields)] struct N { v: u32 }
+/// # impl st_data::Schema for N { const KIND: &'static str = "n"; const VERSION: u32 = 1;
+/// #   type Previous = st_data::Genesis; fn migrate(p: st_data::Genesis) -> Result<Self, st_data::MigrationError> { match p {} } }
+/// # impl st_data::Validate for N { fn validate(&self, _: &mut st_data::Validator) {} }
+/// use st_game::{HotData, ReloadReport};
+/// use st_time::Nanos;
+///
+/// let config = st_platform::WatcherConfig::new().quiet_period(Nanos::ZERO);
+/// let mut hot = HotData::<N>::open_with(&dir, st_data::Loader::new(), config)?;
+/// let mut secs = 0;
+/// let mut next_report = |hot: &mut HotData<N>| -> ReloadReport {
+///     for _ in 0..1000 {
+///         secs += 1;
+///         if let Some(report) = hot.poll(Nanos::from_secs(secs)) {
+///             return report;
+///         }
+///     }
+///     panic!("no report");
+/// };
+///
+/// std::fs::write(dir.join("a.ron"), r#"(kind: "n", version: 1, data: (v: "x"))"#).unwrap();
+/// let rejected = next_report(&mut hot);
+/// assert!(rejected.error.is_some() && rejected.recovered.is_empty());
+///
+/// std::fs::write(dir.join("a.ron"), good).unwrap();
+/// let report = next_report(&mut hot);
+/// assert_eq!(report.recovered, ["a.ron"]);
+/// assert!(report.reloaded.is_none() && report.error.is_none());
+/// assert_eq!(hot.generation(), 0);
+/// # std::fs::remove_dir_all(&dir).unwrap();
+/// # Ok::<(), st_game::ReloadError>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReloadReport {
     /// Set when a new snapshot was swapped in.
@@ -221,6 +269,7 @@ pub struct ReloadReport {
     /// The files that had a standing problem and were accepted in this batch,
     /// in source-name order. A file is listed even when its content equals the
     /// value already in use (then `reloaded` is `None` or does not name it).
+    /// See the example above.
     pub recovered: Vec<String>,
 }
 
@@ -342,6 +391,51 @@ impl<T: Schema + Validate> HotData<T> {
     /// Every problem that still stands: the latest diagnostics of each file
     /// that failed and has not loaded cleanly since, in source-name order.
     /// `None` when all is well. The previous value of each such file is in use.
+    ///
+    /// A removed file that had a value keeps a `missing-source` problem until
+    /// it is created again (the module documentation says why).
+    ///
+    /// ```
+    /// # let dir = std::env::temp_dir().join(format!("st-game-doc-standing-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&dir).unwrap();
+    /// # let good = r#"(kind: "n", version: 1, data: (v: 1))"#;
+    /// # std::fs::write(dir.join("a.ron"), good).unwrap();
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Serialize, Deserialize)] #[serde(deny_unknown_fields)] struct N { v: u32 }
+    /// # impl st_data::Schema for N { const KIND: &'static str = "n"; const VERSION: u32 = 1;
+    /// #   type Previous = st_data::Genesis; fn migrate(p: st_data::Genesis) -> Result<Self, st_data::MigrationError> { match p {} } }
+    /// # impl st_data::Validate for N { fn validate(&self, _: &mut st_data::Validator) {} }
+    /// use st_game::HotData;
+    /// use st_time::Nanos;
+    ///
+    /// let config = st_platform::WatcherConfig::new().quiet_period(Nanos::ZERO);
+    /// let mut hot = HotData::<N>::open_with(&dir, st_data::Loader::new(), config)?;
+    /// // A bounded poll loop on a made-up clock (a real loop polls once per frame).
+    /// let mut secs = 0;
+    /// let mut next_report = |hot: &mut HotData<N>| {
+    ///     for _ in 0..1000 {
+    ///         secs += 1;
+    ///         if let Some(report) = hot.poll(Nanos::from_secs(secs)) {
+    ///             return report;
+    ///         }
+    ///     }
+    ///     panic!("no report");
+    /// };
+    /// assert!(hot.standing_error().is_none());
+    ///
+    /// // A bad save: the problem stands.
+    /// std::fs::write(dir.join("a.ron"), r#"(kind: "n", version: 1, data: (v: "x"))"#).unwrap();
+    /// assert!(next_report(&mut hot).error.is_some());
+    /// let standing = hot.standing_error().expect("a.ron is still wrong");
+    /// assert_eq!(standing.diagnostics()[0].source, "a.ron");
+    ///
+    /// // Restoring the file ends it, although the values equal the old ones.
+    /// std::fs::write(dir.join("a.ron"), good).unwrap();
+    /// next_report(&mut hot);
+    /// assert!(hot.standing_error().is_none());
+    /// # std::fs::remove_dir_all(&dir).unwrap();
+    /// # Ok::<(), st_game::ReloadError>(())
+    /// ```
     pub fn standing_error(&self) -> Option<ReloadError> {
         let diags: Vec<Diagnostic> = self.standing.values().flatten().cloned().collect();
         (!diags.is_empty()).then(|| ReloadError::new(diags))
