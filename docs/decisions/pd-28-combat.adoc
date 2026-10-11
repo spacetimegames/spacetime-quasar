@@ -29,4 +29,6 @@
 * Facing and section-effect rules live in data files.
 * Capture of disabled ships is a later item.
 
+*Future direction (not a commitment).* To counterbalance the targeting computer later, ship designs may place propulsion away from the rear: pulling rather than pushing engines, or drives based on different physical principles. That way, which facing hides the engines is not obvious. This fits the data-driven section layout and player-built ships.
+
 *Reference games.* _EV: Nova_, _Freelancer_, _Elite Dangerous_, _Rebel Galaxy_.
