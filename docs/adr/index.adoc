@@ -33,6 +33,11 @@ in the same commit.
 | Accepted
 | 2026-10-10
 
+| xref:0006-math-library-boundary.adoc[0006]
+| Math library boundary: glam everywhere, nalgebra only inside Rapier
+| Accepted
+| 2026-10-11
+
 | xref:0010-data-schema-versioning.adoc[0010]
 | Data schema versioning, migration, content hashing and hot reload
 | Accepted

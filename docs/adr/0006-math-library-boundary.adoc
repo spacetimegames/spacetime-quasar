@@ -1,0 +1,315 @@
+= ADR 0006: Math library boundary: glam everywhere, nalgebra only inside Rapier
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted
+
+== Date
+
+2026-10-11
+
+== Context
+
+The charter binds this decision:
+
+* "Prefer the existing Rust crate when mature: `rapier3d` + `parry3d`, `wgpu`,
+  `winit`, `bytemuck`, ... The boundary between `nalgebra` (Rapier's types)
+  and `glam` (GPU-facing), or dropping one, is an Architect ADR in Phase 1."
+* `st-math` provides coordinate frames, large-world translation
+  (camera-relative origin), orbit and Kepler helpers and interpolation, with
+  deterministic math through a software libm. It is designed as if
+  publishable: no game types in public signatures and no panics on misuse.
+* `st-sim` is headless and has no GPU dependency; `st-render` is built on
+  wgpu and is GPU-facing.
+* The simulation is bit-identical across platforms (PD-06). How that is
+  achieved is xref:0008-determinism-implementation.adoc[ADR 0008]; f32 versus
+  f64 and the coordinate scheme are
+  xref:0007-large-world-coordinates.adoc[ADR 0007]. This ADR fixes which types
+  each layer uses and where they convert.
+* The workspace denies `unsafe_code`; every crate builds for the four
+  project targets (xref:0001-toolchain-msrv-nix.adoc[ADR 0001]); dependencies
+  follow xref:0002-dependency-policy.adoc[ADR 0002]. Data files follow the
+  schema rules of xref:0010-data-schema-versioning.adoc[ADR 0010].
+
+The charter assumed that Rapier speaks nalgebra. That is no longer true, so
+the boundary question changes shape.
+
+=== Facts verified on 2026-10-11
+
+From the crates.io API and the published crate sources:
+
+* `rapier3d` and `rapier3d-f64` 0.36.1 were published on 2026-10-10
+  (Apache-2.0, `rust-version` 1.86); `parry3d` and `parry3d-f64` 0.31.1 on
+  2026-09-18 (Apache-2.0).
+* Rapier's and Parry's public math types are glam types, through Dimforge's
+  `glamx` 0.3.1 (2026-09-17, `MIT OR Apache-2.0`). In `parry3d-f64`
+  `math`: `Vector = glam::DVec3`, `Rotation = glamx::DRot3`, which is
+  `glam::DQuat`, `Pose = glamx::DPose3` (a `+#[repr(C)]+` struct with public
+  fields `rotation: DQuat` and `translation: DVec3`) and `Real = f64`.
+  `rapier3d_f64::math` re-exports them. `RigidBody::translation`, `rotation`,
+  `position`, `linvel`, `angvel`, `set_*`, `apply_impulse` and the
+  `RigidBodyBuilder` setters take and return these types. The f32 crates use
+  `Vec3`, `Quat` and `Pose3`.
+* `nalgebra` 0.35 is still a normal dependency of `rapier3d(-f64)` 0.36.1.
+  Rapier uses it internally (structure-of-arrays SIMD solver types) and in
+  the multibody joint API (for example `Multibody::damping() -> &DVector`).
+  Rapier's `prelude` re-exports `nalgebra` and its `vector!` and `point!`
+  macros.
+* `glamx` 0.3.1 requires `glam ^0.33.7`. `glam` 0.34.1 (2026-10-06) exists,
+  but depending on it would put two incompatible glam versions in the tree.
+  `glam` 0.33.12 (2026-10-01, `MIT OR Apache-2.0`, `rust-version` 1.68.2) is
+  the newest 0.33 release.
+* glam 0.33.12 features: `f64` enables the `D*` types; `libm` routes glam's
+  own float functions (`sqrt`, `sin_cos`, `acos`, ...) through the `libm`
+  crate, whether or not `std` is enabled; `scalar-math` disables SIMD
+  storage. In its source, `Vec4`, `Quat` and `Mat4` carry `repr(align(16))`
+  only when `scalar-math` is off
+  (`+#[cfg_attr(any(not(feature = "scalar-math"), feature = "cuda"), repr(align(16)))]+`);
+  `Vec3A` is always 16-byte aligned. `DVec3::as_vec3`, `DQuat::as_quat` and
+  `Mat4::perspective_infinite_reverse_rh` exist.
+* The `parry3d(-f64)` feature `enhanced-determinism` enables `glamx/libm` and
+  `glamx/scalar-math`, so through Cargo feature unification every build that
+  contains the physics stack has glam `libm` and `scalar-math` on.
+* `bytemuck` 1.25.2 (`Zlib OR Apache-2.0 OR MIT`) and `bytemuck_derive`
+  1.12.1 are already in `Cargo.lock` through wgpu.
+* A scratch crate outside the repository, depending on `rapier3d-f64` 0.36.1
+  and `glam` 0.33.12, compiled `let _: glam::DVec3 = rapier3d_f64::math::Vector::ZERO;`
+  and `let _: glam::DQuat = rapier3d_f64::math::Rotation::IDENTITY;`: one
+  glam in the graph, the same types on both sides, no conversion.
+
+== Decision
+
+=== One math library: glam 0.33
+
+* glam is the only linear-algebra crate that workspace code names.
+* nalgebra is not a dependency of any workspace crate, and workspace code
+  does not name it, including through Rapier's re-exports
+  (`rapier3d_f64::prelude::nalgebra`, `vector!`, `point!`). It stays a
+  private transitive dependency of Rapier. Rapier APIs that expose nalgebra
+  (multibody joints, solver internals) are not used; ADR 0008 also excludes
+  multibody joints for determinism reasons. This drops nalgebra from our side
+  of the boundary.
+* The workspace declares glam once, in `[workspace.dependencies]`:
++
+[source,toml]
+----
+glam = { version = "0.33.12", default-features = false, features = ["f64", "libm", "scalar-math"] }
+----
++
+Crates use `glam.workspace = true` and add no glam features of their own.
+glam's `serde` feature is not used: data files carry math values as
+schema types of xref:0010-data-schema-versioning.adoc[ADR 0010], so the
+data format does not depend on how a glam release serialises its types. The
+`bytemuck` feature is not needed under the GPU rules below. The `std`
+feature stays off. glam does not need it with `libm`, and ADR 0008 explains
+why std-linked math crates are a determinism hazard for the physics stack.
+* `libm` and `scalar-math` are set here explicitly, although the physics
+  stack already forces them. This keeps glam's behaviour and layout the same
+  in every build of every crate, including `cargo test -p st-render`, which
+  does not contain Rapier.
+* glam's minor version follows Rapier's. When a Rapier upgrade moves `glamx`
+  to a newer glam minor, the workspace glam moves in the same PR.
+
+=== Types per layer
+
+[cols="2,3,1,5",options="header"]
+|===
+| Layer | Crates | Scalar | Types
+
+| Simulation
+| `st-sim`, `st-math` (sim-facing functions), `st-time`, `st-rng`, the output of `st-data`
+| `f64`
+| `DVec3` for positions, velocities, accelerations, forces, torques and
+  angular velocities; `DQuat` for orientations; `DMat3` for inertia tensors;
+  `rapier3d_f64::math::Pose` (`glamx::DPose3`) only at the Rapier boundary.
+  Counted quantities (credits, cargo units, ammunition, ticks, ids) are
+  fixed-width integers, never floats and never `usize`.
+
+| Physics
+| `rapier3d-f64`, Parry through `rapier3d_f64::parry`
+| `f64`
+| The same glam types; no conversion.
+
+| Data
+| `st-data`, `+assets/**/*.ron+`
+| `f64` for anything that becomes simulation state
+| Schema types of ADR 0010: plain RON structs or tuples deriving serde,
+  with finite floats. They are converted to the simulation types above at
+  load. Each schema defines its own shapes, for example degrees or radians,
+  Euler angles or quaternions.
+
+| Rendering, HUD, audio, geometry, materials
+| `st-render`, `st-hud`, `st-audio`, `st-geometry`, `st-materials`
+| `f32`
+| `Vec2`, `Vec3`, `Vec4`, `Quat`, `Mat3`, `Mat4` for CPU-side math in render
+  space (camera-relative, ADR 0007).
+
+| GPU buffers
+| `st-render`, vertex structs in `st-geometry`
+| `f32`, `u32`, `i32`
+| `+#[repr(C)]+` plain-old-data structs made of arrays, never glam types
+  (see below).
+|===
+
+=== Conversion points
+
+Conversions happen only at these places:
+
+. *Data to simulation:* in `st-data`, when validated ADR 0010 schema values
+  become simulation types. Unit conversions (for example degrees to radians,
+  if a schema uses degrees) use `st_math::det` (ADR 0008), so they are
+  deterministic.
+. *Simulation to physics, and back:* none. Both sides use the same types.
+. *Simulation to render:* in one place, `st_math`'s render origin (ADR 0007).
+  `RenderOrigin::to_render(p: DVec3) -> Vec3` subtracts the origin in f64
+  and rounds once with `as_vec3()`. Orientations are converted with
+  `DQuat::as_quat()`. Interpolation between two simulation ticks
+  (`st-math` interpolation helpers) is done in f64, before the conversion.
+. *Render to GPU:* glam values are written into plain-old-data structs with
+  `Vec3::to_array()`, `Quat::to_array()` (order x, y, z, w) and
+  `Mat4::to_cols_array_2d()` (column-major, like WGSL `mat4x4<f32>`), then
+  uploaded with `bytemuck::cast_slice`.
+. *Geometry:* `st-geometry` produces f32 meshes in mesh-local metres and never
+  feeds the simulation. Collider shapes are built by `st-sim` in f64 from
+  design data (ADR 0008).
+. *Input to simulation:* `st-game` turns device input into commands. Their
+  encoding belongs to ADR 0009.
+
+=== `st-math` re-exports glam and does not wrap it
+
+* `st-math` has `pub use glam;` at its root. Its public signatures use glam
+  types directly (`DVec3`, `DQuat`, `Vec3`, `Quat`, `Mat4`), so a consumer of
+  a published `st-math` can name the exact glam version it was built with.
+* There are no newtypes around vectors, quaternions or matrices. They would
+  block zero-cost interop with Rapier, whose API is glam, and duplicate
+  glam's API. `st-math` adds named types only where the meaning differs from
+  a plain vector, such as `RenderOrigin` (ADR 0007).
+* `st-math`'s public API stays generic math without game types. Operations
+  that can fail on bad input return `Option` or `Result` instead of
+  panicking, for example normalising a zero-length vector or diagonalising a
+  matrix with non-finite entries.
+
+=== GPU-facing layout with bytemuck
+
+* `bytemuck` is admitted for `st-render` and `st-geometry`, as
+  `bytemuck = { version = "1.25", features = ["derive"] }` in
+  `[workspace.dependencies]`.
+* Every struct uploaded to the GPU follows these rules:
+** `+#[repr(C)]+` and `+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]+`.
+** Fields are only `f32`, `u32`, `i32`, arrays of them (`[f32; N]`,
+   `[u32; N]`) and `[[f32; 4]; 4]`. No glam types, `bool`, `usize`, enums,
+   references or pointers.
+** Field order and explicit padding follow WGSL's layout rules for
+   host-shareable structs. A `vec3<f32>` field (`[f32; 3]`) starts at a
+   multiple of 16 bytes and is followed by a 4-byte scalar or an explicit
+   `_pad` field. `vec4` and `mat4x4` fields start at multiples of 16. The
+   struct size is a multiple of 16.
+** Next to each struct, compile-time checks pin its size and every field
+   offset: `+const _: () = assert!(core::mem::size_of::<T>() == N);+` and
+   `+assert!(core::mem::offset_of!(T, field) == K)+`.
+** The matching WGSL struct is written by hand. The Phase 2 renderer ADR adds
+   a test that compares these offsets with naga's reflection of the shader.
+* Why not glam types inside these structs: the alignment of `Vec4`, `Quat`
+  and `Mat4` is 16 or 4 bytes depending on glam's `scalar-math` feature, and
+  any crate in a build can switch that feature on (Parry's
+  `enhanced-determinism` does). A struct containing them would silently
+  change layout between builds. Arrays have 4-byte alignment everywhere, so
+  the layout is explicit and checked.
+* Example. The real structs are defined by the Phase 2 renderer.
++
+[source,rust]
+----
+/// One instance in render space (camera-relative metres, ADR 0007).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuInstance {
+    pub translation: [f32; 3],      // WGSL vec3<f32>, offset 0
+    pub scale: f32,                 // offset 12
+    pub rotation: [f32; 4],         // WGSL vec4<f32> (quaternion x, y, z, w), offset 16
+    pub prev_translation: [f32; 3], // previous frame, same render origin, offset 32
+    pub mesh_index: u32,            // offset 44
+}
+const _: () = assert!(core::mem::size_of::<GpuInstance>() == 48);
+const _: () = assert!(core::mem::offset_of!(GpuInstance, rotation) == 16);
+----
+
+=== Dependencies admitted
+
+Each row goes into the ADR 0002 register in the PR that first adds the
+dependency.
+
+[cols="2,2,2,5",options="header"]
+|===
+| Crate | Requirement | Admitted for | Notes
+
+| `glam`
+| `0.33` (0.33.12 at admission)
+| Phase 1 (ADR 0006)
+| The single math library. `default-features = false`, features `f64`,
+  `libm`, `scalar-math`. The minor version follows Rapier's `glamx`.
+
+| `bytemuck`
+| `1.25` (1.25.2 at admission)
+| Phase 2, `st-render` and `st-geometry` (ADR 0006)
+| `derive` feature. Plain-old-data GPU structs made of arrays only.
+|===
+
+`rapier3d-f64` is admitted by ADR 0007 and `libm` by ADR 0008.
+
+== Alternatives considered
+
+nalgebra for simulation and physics, glam for rendering (the boundary the charter anticipated)::
+  Rapier 0.33 and later no longer expose nalgebra in their rigid-body API.
+  Keeping nalgebra on our side would add conversions at every physics call
+  for no benefit.
+nalgebra everywhere::
+  Rapier's API is glam now, and so is the GPU-facing ecosystem. nalgebra's
+  generic types would also cost compile time.
+glam 0.34::
+  Incompatible with `glamx` 0.3. Two glam versions in one graph means two
+  sets of types.
+Newtypes over glam in `st-math`::
+  Hides nothing worth hiding, blocks direct use of Rapier's API and doubles
+  the API surface to maintain.
+`st-math` as the only door to glam, with no direct glam dependency elsewhere::
+  Possible through the re-export, but every crate already shares the
+  workspace declaration, so it buys nothing; crates may use either path.
+glam types inside GPU structs (glam's `bytemuck` feature)::
+  The layout would depend on `scalar-math`, which another crate's features
+  can toggle.
+`encase` or `crevice` for automatic WGSL layout::
+  An extra dependency for a handful of structs. Arrays plus compile-time
+  offset checks are enough for now; revisit in the Phase 2 renderer ADR if
+  the number of GPU structs grows.
+`mint` as an interop layer::
+  Unnecessary with a single math library.
+
+== Consequences
+
+* No conversions between simulation and physics code, and one conversion
+  point between simulation and rendering (`RenderOrigin`).
+* glam's `scalar-math` is always on, so CPU-side render math runs without
+  SIMD. The cost is negligible: the renderer is GPU-driven, and the CPU
+  converts about 250 dynamic instances per frame.
+* A Rapier upgrade that moves `glamx` to a new glam minor moves the workspace
+  glam in the same PR (the upgrade checklist is in ADR 0008).
+* Reviewers reject direct nalgebra use and glam types inside GPU structs.
+* Revisit if Rapier changes math library again, or if the number of GPU
+  structs makes a layout-derivation crate worthwhile.
+
+== References
+
+* glam: https://crates.io/crates/glam, https://docs.rs/glam/0.33.12/glam/
+* glamx: https://crates.io/crates/glamx
+* Rapier: https://crates.io/crates/rapier3d-f64, https://docs.rs/rapier3d-f64/0.36.1/
+* Parry: https://crates.io/crates/parry3d-f64
+* bytemuck: https://crates.io/crates/bytemuck
+* WGSL memory layout: https://www.w3.org/TR/WGSL/#memory-layouts
+* xref:0002-dependency-policy.adoc[ADR 0002],
+  xref:0007-large-world-coordinates.adoc[ADR 0007],
+  xref:0008-determinism-implementation.adoc[ADR 0008],
+  xref:0010-data-schema-versioning.adoc[ADR 0010]
+* Jira: SPAC-103
