@@ -1702,6 +1702,13 @@ dependencies = [
 [[package]]
 name = "st-game"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "st-data",
+ "st-game",
+ "st-platform",
+ "st-time",
+]
 
 [[package]]
 name = "st-geometry"

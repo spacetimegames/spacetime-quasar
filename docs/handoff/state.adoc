@@ -44,6 +44,7 @@ All of this is on `main`.
 * `st-time`: fixed-step clock and frame-budget statistics (PR #20).
 * `st-data` core: versioned RON envelope, migrations, canonical BLAKE3 hashes and diagnostics (PR #19).
 * `st-platform` core: filesystem, clock, and a hot-reload watcher behind a feature (PR #21).
+* `st-data` hot-reload wiring: `st_game::HotData` feeds the `st-platform` watcher into the `st-data` loader (feature `hot-reload`, off by default) with `Arc` snapshots, a valid batch applied atomically, and bad or removed files reported once without blocking others (SPAC-124).
 * `st-math`: deterministic scalar math (`det`) and the camera-relative render origin (PR #25); from SPAC-123, Kepler orbits for on-rails bodies (elliptic only, fixed-iteration solver) and `f64` interpolation (lerp, nlerp, slerp, Hermite), with bit-pattern golden tests.
 * `st-sim` (minimal): commands, fixed step, state hash and three scenarios, plus the `determinism` harness in `tools/determinism` (PR #26; xref:../62-determinism-harness.adoc[how to run it]).
 * The flake keeps `.ron` data files in its source filter (PR #22).
@@ -59,7 +60,6 @@ Minimal `st-sim` and the determinism harness are done (SPAC-122; xref:../62-dete
 Then, in order:
 
 * The `determinism` compare job (artifact upload of the four outputs), the leak detector and replay files as scenarios.
-* `st-data` hot-reload wiring.
 * The Phase 1 CLI demo: it hot-reloads a `.ron` value and prints validated values plus a deterministic replay hash.
 * The Phase 1 hands-on test.
 
