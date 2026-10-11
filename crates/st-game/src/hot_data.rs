@@ -48,8 +48,23 @@
 //!   `missing-source`, and is never requeued. It does not hold back the other
 //!   files of its batch, and creating the path again loads it.
 //!   Remove-then-create or rename-over (how editors save) ends in a reload.
-//! * A file whose content hash did not change produces no event, and a batch
-//!   with no hash change at all produces nothing.
+//! * A file whose content hash did not change produces no [`ReloadEvent`], and
+//!   a batch with no hash change at all produces no new snapshot.
+//! * A problem *stands* until its file loads again. [`HotData`] remembers the
+//!   latest diagnostics of every file that failed ([`HotData::standing_error`]).
+//!   When such a file loads cleanly in an accepted batch, the report lists it in
+//!   [`ReloadReport::recovered`], **even if its content is identical to the
+//!   value already in use**: the usual "bad edit, then undo" changes nothing in
+//!   the snapshot, but it does end the problem. The report is returned for that
+//!   alone, so a caller that shows the problem can stop showing it.
+//! * What a removal does to a standing problem. A file that had a value and is
+//!   removed (whatever its earlier problem was) keeps a `missing-source`
+//!   problem **until the path is created again**, then it recovers like any
+//!   other. This is kept, not cleared, on purpose: the removed file's last value
+//!   is still in use (ADR 0010), and clearing the problem would tell a caller
+//!   that all is well while a file the game depends on is gone. A file that was
+//!   never loaded and is then removed has its problem dropped silently: there is
+//!   no value in use for it to be about.
 
 use st_data::{Code, ContentHash, Diagnostic, Loaded, Loader, Schema, Validate};
 use st_platform::{
@@ -201,13 +216,61 @@ impl Error for ReloadError {}
 /// }
 /// # let _ = log;
 /// ```
+///
+/// A file that was wrong and is valid again is listed in `recovered`, even
+/// when its content equals the value in use (then nothing else is reported):
+///
+/// ```
+/// # let dir = std::env::temp_dir().join(format!("st-game-doc-recovered-{}", std::process::id()));
+/// # std::fs::create_dir_all(&dir).unwrap();
+/// # let good = r#"(kind: "n", version: 1, data: (v: 1))"#;
+/// # std::fs::write(dir.join("a.ron"), good).unwrap();
+/// # use serde::{Deserialize, Serialize};
+/// # #[derive(Serialize, Deserialize)] #[serde(deny_unknown_fields)] struct N { v: u32 }
+/// # impl st_data::Schema for N { const KIND: &'static str = "n"; const VERSION: u32 = 1;
+/// #   type Previous = st_data::Genesis; fn migrate(p: st_data::Genesis) -> Result<Self, st_data::MigrationError> { match p {} } }
+/// # impl st_data::Validate for N { fn validate(&self, _: &mut st_data::Validator) {} }
+/// use st_game::{HotData, ReloadReport};
+/// use st_time::Nanos;
+///
+/// let config = st_platform::WatcherConfig::new().quiet_period(Nanos::ZERO);
+/// let mut hot = HotData::<N>::open_with(&dir, st_data::Loader::new(), config)?;
+/// let mut secs = 0;
+/// let mut next_report = |hot: &mut HotData<N>| -> ReloadReport {
+///     for _ in 0..1000 {
+///         secs += 1;
+///         if let Some(report) = hot.poll(Nanos::from_secs(secs)) {
+///             return report;
+///         }
+///     }
+///     panic!("no report");
+/// };
+///
+/// std::fs::write(dir.join("a.ron"), r#"(kind: "n", version: 1, data: (v: "x"))"#).unwrap();
+/// let rejected = next_report(&mut hot);
+/// assert!(rejected.error.is_some() && rejected.recovered.is_empty());
+///
+/// std::fs::write(dir.join("a.ron"), good).unwrap();
+/// let report = next_report(&mut hot);
+/// assert_eq!(report.recovered, ["a.ron"]);
+/// assert!(report.reloaded.is_none() && report.error.is_none());
+/// assert_eq!(hot.generation(), 0);
+/// # std::fs::remove_dir_all(&dir).unwrap();
+/// # Ok::<(), st_game::ReloadError>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReloadReport {
     /// Set when a new snapshot was swapped in.
     pub reloaded: Option<Reloaded>,
-    /// Set when something was wrong; the previous value of each file at fault
-    /// stays in use.
+    /// Set when something was wrong in this batch; the previous value of each
+    /// file at fault stays in use. It names only this batch's problems: for
+    /// everything that still stands, see [`HotData::standing_error`].
     pub error: Option<ReloadError>,
+    /// The files that had a standing problem and were accepted in this batch,
+    /// in source-name order. A file is listed even when its content equals the
+    /// value already in use (then `reloaded` is `None` or does not name it).
+    /// See the example above.
+    pub recovered: Vec<String>,
 }
 
 /// How often a file whose read keeps failing is tried again before it is
@@ -242,6 +305,9 @@ pub struct HotData<T> {
     current: Arc<DataSnapshot<T>>,
     // Failed reads per source name, for the bounded retry.
     attempts: BTreeMap<String, u32>,
+    // The latest problem of each file that has one, by source name, until the
+    // file loads again. An unrelated file's good batch does not clear it.
+    standing: BTreeMap<String, Vec<Diagnostic>>,
 }
 
 impl<T: Schema + Validate> HotData<T> {
@@ -303,6 +369,7 @@ impl<T: Schema + Validate> HotData<T> {
             watcher,
             loader,
             attempts: BTreeMap::new(),
+            standing: BTreeMap::new(),
             current: Arc::new(DataSnapshot {
                 generation: 0,
                 files,
@@ -319,6 +386,59 @@ impl<T: Schema + Validate> HotData<T> {
     /// The generation of the current snapshot.
     pub fn generation(&self) -> u64 {
         self.current.generation
+    }
+
+    /// Every problem that still stands: the latest diagnostics of each file
+    /// that failed and has not loaded cleanly since, in source-name order.
+    /// `None` when all is well. The previous value of each such file is in use.
+    ///
+    /// A removed file that had a value keeps a `missing-source` problem until
+    /// it is created again (the module documentation says why).
+    ///
+    /// ```
+    /// # let dir = std::env::temp_dir().join(format!("st-game-doc-standing-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&dir).unwrap();
+    /// # let good = r#"(kind: "n", version: 1, data: (v: 1))"#;
+    /// # std::fs::write(dir.join("a.ron"), good).unwrap();
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Serialize, Deserialize)] #[serde(deny_unknown_fields)] struct N { v: u32 }
+    /// # impl st_data::Schema for N { const KIND: &'static str = "n"; const VERSION: u32 = 1;
+    /// #   type Previous = st_data::Genesis; fn migrate(p: st_data::Genesis) -> Result<Self, st_data::MigrationError> { match p {} } }
+    /// # impl st_data::Validate for N { fn validate(&self, _: &mut st_data::Validator) {} }
+    /// use st_game::HotData;
+    /// use st_time::Nanos;
+    ///
+    /// let config = st_platform::WatcherConfig::new().quiet_period(Nanos::ZERO);
+    /// let mut hot = HotData::<N>::open_with(&dir, st_data::Loader::new(), config)?;
+    /// // A bounded poll loop on a made-up clock (a real loop polls once per frame).
+    /// let mut secs = 0;
+    /// let mut next_report = |hot: &mut HotData<N>| {
+    ///     for _ in 0..1000 {
+    ///         secs += 1;
+    ///         if let Some(report) = hot.poll(Nanos::from_secs(secs)) {
+    ///             return report;
+    ///         }
+    ///     }
+    ///     panic!("no report");
+    /// };
+    /// assert!(hot.standing_error().is_none());
+    ///
+    /// // A bad save: the problem stands.
+    /// std::fs::write(dir.join("a.ron"), r#"(kind: "n", version: 1, data: (v: "x"))"#).unwrap();
+    /// assert!(next_report(&mut hot).error.is_some());
+    /// let standing = hot.standing_error().expect("a.ron is still wrong");
+    /// assert_eq!(standing.diagnostics()[0].source, "a.ron");
+    ///
+    /// // Restoring the file ends it, although the values equal the old ones.
+    /// std::fs::write(dir.join("a.ron"), good).unwrap();
+    /// next_report(&mut hot);
+    /// assert!(hot.standing_error().is_none());
+    /// # std::fs::remove_dir_all(&dir).unwrap();
+    /// # Ok::<(), st_game::ReloadError>(())
+    /// ```
+    pub fn standing_error(&self) -> Option<ReloadError> {
+        let diags: Vec<Diagnostic> = self.standing.values().flatten().cloned().collect();
+        (!diags.is_empty()).then(|| ReloadError::new(diags))
     }
 
     /// Does one slice of watcher work; call once per frame with a monotonic
@@ -367,6 +487,9 @@ impl<T: Schema + Validate> HotData<T> {
                         Code::MissingSource,
                         "the file was removed; its last value stays in use until it is created again",
                     ));
+                } else {
+                    // Never loaded: no value for an old problem to be about.
+                    self.standing.remove(name);
                 }
                 continue;
             }
@@ -399,6 +522,16 @@ impl<T: Schema + Validate> HotData<T> {
             }
         }
 
+        // A file that failed now has exactly this batch's diagnostics as its
+        // problem; the ones that loaded fine are dealt with once accepted.
+        let mut now_failing: BTreeMap<String, Vec<Diagnostic>> = BTreeMap::new();
+        for d in &diags {
+            now_failing
+                .entry(d.source.clone())
+                .or_default()
+                .push(d.clone());
+        }
+        self.standing.extend(now_failing);
         let error = (!diags.is_empty()).then(|| ReloadError::new(diags));
         if rejected {
             // No value changes. The files that were fine are handed back, so
@@ -410,8 +543,19 @@ impl<T: Schema + Validate> HotData<T> {
             return error.map(|error| ReloadReport {
                 reloaded: None,
                 error: Some(error),
+                recovered: Vec::new(),
             });
         }
+
+        // Accepted: every file that loaded is now what is in use, whether or
+        // not its content differs from before, so its old problem is over.
+        let mut recovered: Vec<String> = loaded
+            .iter()
+            .map(|(change, _)| change.name())
+            .filter(|name| self.standing.remove(*name).is_some())
+            .map(str::to_owned)
+            .collect();
+        recovered.sort();
 
         let mut files = self.current.files.clone();
         let mut events = Vec::new();
@@ -436,10 +580,14 @@ impl<T: Schema + Validate> HotData<T> {
             self.current = Arc::new(DataSnapshot { generation, files });
             Some(Reloaded { generation, events })
         };
-        if reloaded.is_none() && error.is_none() {
+        if reloaded.is_none() && error.is_none() && recovered.is_empty() {
             return None;
         }
-        Some(ReloadReport { reloaded, error })
+        Some(ReloadReport {
+            reloaded,
+            error,
+            recovered,
+        })
     }
 }
 
