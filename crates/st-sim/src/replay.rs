@@ -121,7 +121,7 @@ pub(crate) const CHUNK_OVERHEAD: usize = 4 + 4 + 8;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayHeader {
-    /// The [`SIM_VERSION`](crate::SIM_VERSION)(crate::SIM_VERSION) of the recording build.
+    /// The [`SIM_VERSION`](crate::SIM_VERSION) of the recording build.
     pub sim_version: u32,
     /// The state hash format version of the recording build.
     pub state_hash_version: u32,
@@ -202,7 +202,7 @@ impl Validate for ReplayHeader {
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlayContext {
-    /// The running build's [`SIM_VERSION`](crate::SIM_VERSION)(crate::SIM_VERSION).
+    /// The running build's [`SIM_VERSION`](crate::SIM_VERSION).
     pub sim_version: u32,
     /// The running build's state hash format version.
     pub state_hash_version: u32,

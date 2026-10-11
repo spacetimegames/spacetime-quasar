@@ -102,6 +102,15 @@ impl ReplayWriter {
         if header.start_tick != 0 {
             return Err(ReplayError::BadInput("start_tick must be 0"));
         }
+        // The writer refuses what the reader would refuse.
+        let mut validator = st_data::Validator::new();
+        st_data::Validate::validate(header, &mut validator);
+        if let Some(v) = validator.violations().first() {
+            return Err(ReplayError::HeaderWrite(format!(
+                "invalid header: {}",
+                v.message
+            )));
+        }
         let text = write_envelope(header).map_err(|e| ReplayError::HeaderWrite(e.to_string()))?;
         if text.len() > MAX_HEADER_BYTES {
             return Err(ReplayError::HeaderWrite(format!(

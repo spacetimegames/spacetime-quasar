@@ -71,15 +71,11 @@ fn malformed(offset: usize, error: WireError) -> ReplayError {
     ReplayError::Malformed { offset, error }
 }
 
-/// Checks the magic. A file that is a prefix of the magic is truncated, any
-/// other short or different file is not a replay.
+/// Checks the magic. Anything that does not start with it, a prefix of it
+/// or an empty input included, is not a replay (ADR 0009).
 fn check_magic(bytes: &[u8]) -> Result<(), ReplayError> {
     if bytes.starts_with(&MAGIC) {
         Ok(())
-    } else if !bytes.is_empty() && MAGIC.starts_with(bytes) {
-        Err(ReplayError::Truncated {
-            last_complete_tick: None,
-        })
     } else {
         Err(ReplayError::NotAReplay)
     }

@@ -331,11 +331,38 @@ fn not_a_replay() {
             "{bytes:?}"
         );
     }
-    // A prefix of the magic is a cut-off replay.
-    assert!(matches!(
-        ReplayReader::open(&MAGIC[..5], &ctx()),
-        Err(ReplayError::Truncated { .. })
-    ));
+    // A prefix of the magic, or shorter than it, is not a replay either.
+    for n in 0..MAGIC.len() {
+        assert_eq!(
+            ReplayReader::open(&MAGIC[..n], &ctx()).unwrap_err(),
+            ReplayError::NotAReplay,
+            "{n} bytes"
+        );
+        assert_eq!(
+            read_header(&MAGIC[..n]).unwrap_err(),
+            ReplayError::NotAReplay
+        );
+    }
+}
+
+#[test]
+fn the_writer_refuses_a_header_the_reader_would_refuse() {
+    let s = scenarios::solo_burn();
+    let hash = Sim::new(&s.setup, s.seed).unwrap().state_hash().unwrap();
+    let good = header_for(&s);
+    assert!(ReplayWriter::new(&good, &s.setup, hash).is_ok());
+    let mut bad_hash = good.clone();
+    bad_hash.data_set_hash = "b3:nothex".to_owned();
+    let mut long_build = good.clone();
+    long_build.build = "x".repeat(257);
+    let mut many_pilots = good.clone();
+    many_pilots.local_pilots = (0..1025).collect();
+    for header in [bad_hash, long_build, many_pilots] {
+        assert!(matches!(
+            ReplayWriter::new(&header, &s.setup, hash),
+            Err(ReplayError::HeaderWrite(_))
+        ));
+    }
 }
 
 #[test]
