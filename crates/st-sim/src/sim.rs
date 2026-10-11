@@ -10,7 +10,7 @@ use crate::command::{
     CONTROLS_COMPONENT_TAG, Command, CommandKind, ControlState, MAX_COMMANDS_PER_TICK, PilotId,
     StepError,
 };
-use crate::hash::{HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
+use crate::hash::{DumpLine, HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
 
 /// Hashes are taken every this many ticks (1 s at 120 Hz), at tick 0 and at
 /// the final tick (ADR 0008, "Checkpoints").
@@ -333,20 +333,46 @@ impl Sim {
     /// [`HashError::NotANumber`] if any state is a NaN.
     pub fn state_hash(&self) -> Result<u64, HashError> {
         let mut h = StateHasher::new();
+        self.write_state(&mut h)?;
+        Ok(h.finish())
+    }
+
+    /// The canonical bytes that [`Sim::state_hash`] folds, one line per
+    /// section header and per entity or pilot (the `--dump-tick` input of the
+    /// harness, ADR 0008). Two platforms with different hashes can diff these
+    /// to find the entity and field that differ.
+    ///
+    /// # Errors
+    ///
+    /// [`HashError::NotANumber`] if any state is a NaN.
+    pub fn state_dump(&self) -> Result<Vec<DumpLine>, HashError> {
+        let mut h = StateHasher::recording();
+        self.write_state(&mut h)?;
+        Ok(h.into_dump())
+    }
+
+    /// The one place that defines the canonical stream, so the hash and the
+    /// dump cannot disagree.
+    fn write_state(&self, h: &mut StateHasher) -> Result<(), HashError> {
+        h.begin_line("STQH", None);
         h.tag(b"STQH");
         h.u32(HASH_FORMAT_VERSION);
         h.u64(self.tick);
         h.u64(self.seed);
 
+        h.begin_line("ENTS", None);
         h.tag(b"ENTS");
         h.count(self.ships.len());
         for (id, ship) in &self.ships {
-            ship.state_hash_with_id(*id, &mut h)?;
+            h.begin_line("ENTS", Some(*id));
+            ship.state_hash_with_id(*id, h)?;
         }
 
+        h.begin_line("PILT", None);
         h.tag(b"PILT");
         h.count(self.pilots.len());
         for (id, pilot) in &self.pilots {
+            h.begin_line("PILT", Some(id.0));
             h.u64(id.0);
             h.option_tag(pilot.controlled.is_some());
             if let Some(ship) = pilot.controlled {
@@ -355,11 +381,12 @@ impl Sim {
             h.u64(pilot.last_seq);
             h.count(1);
             h.u32(CONTROLS_COMPONENT_TAG);
-            pilot.controls.state_hash(&mut h)?;
+            pilot.controls.state_hash(h)?;
         }
 
+        h.begin_line("GLOB", None);
         h.tag(b"GLOB");
         h.f64(self.gravity_mu)?;
-        Ok(h.finish())
+        Ok(())
     }
 }

@@ -14,7 +14,7 @@ use st_rng::Stream;
 use st_time::Tick;
 
 use crate::command::{Command, CommandKind, ControlState, PilotId, StepError};
-use crate::hash::HashError;
+use crate::hash::{DumpLine, HashError};
 use crate::sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
 
 /// Attractor strength shared by the scenarios, in m^3/s^2.
@@ -45,6 +45,37 @@ pub struct Checkpoint {
     pub tick: Tick,
     /// Canonical state hash at that tick.
     pub hash: u64,
+}
+
+/// A scenario being replayed: the simulation and how many commands it has
+/// consumed.
+struct Run<'a> {
+    scenario: &'a Scenario,
+    sim: Sim,
+    next: usize,
+}
+
+impl<'a> Run<'a> {
+    fn new(scenario: &'a Scenario) -> Result<Self, RunError> {
+        Ok(Self {
+            scenario,
+            sim: Sim::new(&scenario.setup, scenario.seed).map_err(RunError::Setup)?,
+            next: 0,
+        })
+    }
+
+    /// Steps one tick with the commands stamped at or before it.
+    fn step(&mut self) -> Result<(), RunError> {
+        let tick = self.sim.tick();
+        let commands = &self.scenario.commands;
+        let start = self.next;
+        while self.next < commands.len() && commands[self.next].tick <= tick {
+            self.next += 1;
+        }
+        self.sim
+            .step(&commands[start..self.next])
+            .map_err(|error| RunError::Step { tick, error })
+    }
 }
 
 /// A scenario failed to run.
@@ -96,29 +127,41 @@ impl Scenario {
     /// As [`Scenario::run`].
     pub fn run_with_interval(&self, every: Tick) -> Result<Vec<Checkpoint>, RunError> {
         let every = every.max(1);
-        let mut sim = Sim::new(&self.setup, self.seed).map_err(RunError::Setup)?;
+        let mut run = Run::new(self)?;
         let mut out = vec![Checkpoint {
             tick: 0,
-            hash: sim.state_hash().map_err(RunError::Hash)?,
+            hash: run.sim.state_hash().map_err(RunError::Hash)?,
         }];
-        let mut next = 0;
-        while sim.tick() < self.ticks {
-            let tick = sim.tick();
-            let start = next;
-            while next < self.commands.len() && self.commands[next].tick <= tick {
-                next += 1;
-            }
-            sim.step(&self.commands[start..next])
-                .map_err(|error| RunError::Step { tick, error })?;
-            let now = sim.tick();
+        while run.sim.tick() < self.ticks {
+            run.step()?;
+            let now = run.sim.tick();
             if now % every == 0 || now == self.ticks {
                 out.push(Checkpoint {
                     tick: now,
-                    hash: sim.state_hash().map_err(RunError::Hash)?,
+                    hash: run.sim.state_hash().map_err(RunError::Hash)?,
                 });
             }
         }
         Ok(out)
+    }
+
+    /// Runs the scenario to `tick` and returns the canonical hash input at
+    /// that tick, one [`DumpLine`] per section header and entity (the
+    /// harness `--dump-tick` output). `Ok(None)` if the scenario is shorter
+    /// than `tick`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Scenario::run`].
+    pub fn dump_at(&self, tick: Tick) -> Result<Option<Vec<DumpLine>>, RunError> {
+        if tick > self.ticks {
+            return Ok(None);
+        }
+        let mut run = Run::new(self)?;
+        while run.sim.tick() < tick {
+            run.step()?;
+        }
+        run.sim.state_dump().map(Some).map_err(RunError::Hash)
     }
 
     /// Runs the scenario and formats one line per checkpoint in the ADR 0003
@@ -339,6 +382,28 @@ mod tests {
         assert_eq!(first.len(), "solo-burn".len() + 1 + 8 + 1 + 16);
         assert!(first.starts_with("solo-burn 00000000 "));
         assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn the_dump_is_the_hashed_stream() {
+        use crate::hash::StateHasher;
+        let s = solo_burn();
+        let want = s
+            .run()
+            .unwrap()
+            .iter()
+            .find(|c| c.tick == 240)
+            .unwrap()
+            .hash;
+        let lines = s.dump_at(240).unwrap().unwrap();
+        let mut h = StateHasher::new();
+        for line in &lines {
+            h.bytes(&line.bytes);
+        }
+        assert_eq!(h.finish(), want);
+        assert!(lines.iter().any(|l| l.section == "ENTS" && l.key.is_some()));
+        assert!(lines.iter().any(|l| l.section == "PILT" && l.key.is_some()));
+        assert!(s.dump_at(s.ticks + 1).unwrap().is_none());
     }
 
     #[test]

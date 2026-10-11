@@ -50,6 +50,39 @@ impl core::error::Error for HashError {}
 #[derive(Clone, Debug)]
 pub struct StateHasher {
     state: u64,
+    /// `Some` when the bytes are also recorded for a dump (`--dump-tick`).
+    capture: Option<Vec<DumpLine>>,
+}
+
+/// One line of a state dump: the canonical bytes of one section header or one
+/// entity (ADR 0008, `--dump-tick`).
+///
+/// Its [`Display`](core::fmt::Display) form is `<section> <key> <hex>`: the
+/// 4-letter section tag, the entity or pilot id (`-` for a section header)
+/// and the bytes as lower-case hex. The bytes of all lines, in order, are
+/// exactly the stream that [`StateHasher::finish`] folded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DumpLine {
+    /// The section tag, such as `ENTS`.
+    pub section: &'static str,
+    /// The entity or pilot id, or `None` for the section header.
+    pub key: Option<u64>,
+    /// The canonical bytes of this line.
+    pub bytes: Vec<u8>,
+}
+
+impl core::fmt::Display for DumpLine {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.section)?;
+        match self.key {
+            Some(k) => write!(f, " {k} ")?,
+            None => f.write_str(" - ")?,
+        }
+        for b in &self.bytes {
+            write!(f, "{b:02x}")?;
+        }
+        Ok(())
+    }
 }
 
 impl Default for StateHasher {
@@ -61,7 +94,39 @@ impl Default for StateHasher {
 impl StateHasher {
     /// Starts an empty stream (the FNV-1a offset basis).
     pub const fn new() -> Self {
-        Self { state: FNV_OFFSET }
+        Self {
+            state: FNV_OFFSET,
+            capture: None,
+        }
+    }
+
+    /// Starts an empty stream that also records its bytes, line by line, for
+    /// [`StateHasher::into_dump`]. The hash is the same as with
+    /// [`StateHasher::new`].
+    pub const fn recording() -> Self {
+        Self {
+            state: FNV_OFFSET,
+            capture: Some(Vec::new()),
+        }
+    }
+
+    /// Starts a new dump line for `section` (and `key`, an entity or pilot
+    /// id). The bytes written next belong to it. Does nothing unless the
+    /// hasher is [`recording`](StateHasher::recording).
+    pub fn begin_line(&mut self, section: &'static str, key: Option<u64>) {
+        if let Some(lines) = &mut self.capture {
+            lines.push(DumpLine {
+                section,
+                key,
+                bytes: Vec::new(),
+            });
+        }
+    }
+
+    /// The recorded lines (empty unless the hasher is
+    /// [`recording`](StateHasher::recording)).
+    pub fn into_dump(self) -> Vec<DumpLine> {
+        self.capture.unwrap_or_default()
     }
 
     /// The hash of everything written so far. The hasher stays usable.
@@ -71,6 +136,9 @@ impl StateHasher {
 
     /// Writes raw bytes.
     pub fn bytes(&mut self, bytes: &[u8]) {
+        if let Some(line) = self.capture.as_mut().and_then(|lines| lines.last_mut()) {
+            line.bytes.extend_from_slice(bytes);
+        }
         for &b in bytes {
             self.state ^= u64::from(b);
             self.state = self.state.wrapping_mul(FNV_PRIME);
@@ -199,6 +267,25 @@ mod tests {
             h.f64(v).unwrap();
         }
         assert_eq!(h.finish(), 0xbd93_cddf_232e_c51c);
+    }
+
+    #[test]
+    fn recording_does_not_change_the_hash_and_keeps_the_bytes() {
+        let mut plain = StateHasher::new();
+        let mut rec = StateHasher::recording();
+        for h in [&mut plain, &mut rec] {
+            h.begin_line("HEAD", None);
+            h.tag(b"HEAD");
+            h.begin_line("ENTS", Some(7));
+            h.u32(1);
+            h.f64(-0.0).unwrap();
+        }
+        assert_eq!(plain.finish(), rec.finish());
+        assert!(plain.into_dump().is_empty());
+        let lines = rec.into_dump();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].to_string(), "HEAD - 48454144");
+        assert_eq!(lines[1].to_string(), "ENTS 7 010000000000000000000000");
     }
 
     #[test]

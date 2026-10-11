@@ -5,14 +5,13 @@ The simulation must be bit-identical on every platform (xref:adr/0008-determinis
 The harness runs a few small scenarios on `st-sim`, takes the state hash every 120 ticks, and compares the result with a committed reference file.
 CI runs it on Linux, Windows, macOS and `wasm32-wasip1` (under wasmtime).
 
-Status: minimal.
+Status: minimal simulation, complete comparison.
 `st-sim` has a handful of bodies and one command kind, and the harness has three scenarios.
-The leak detector, tick dumps, the artifact upload and the `determinism` compare job of xref:adr/0003-ci-design.adoc[ADR 0003] are not built yet.
-Each platform job diffs its own output with the reference file instead, which gives the same pass or fail result.
+The four producer jobs upload their output, the `determinism` job compares the four files with each other and with the reference, the leak detector runs on x86_64 Linux, and `--dump-tick` writes the canonical hash input for diffing (SPAC-125).
 
 From ADR 0009, these are not built yet: replay files (`st_sim::replay`) and replay scenarios, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, session commands, the `StepError` variants `NotExternal` and `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits. The three scenarios are interim and use different names from the scenarios in ADR 0008.
 
-Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38128682426 passed them on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
+Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38128682426 passed the harness and reference comparison on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
 
 == What it checks
 
@@ -59,7 +58,8 @@ diff -u tools/determinism/reference.txt determinism-linux-x86_64.txt
 ----
 
 Options: `--scenario <name>` runs one scenario, and `--checkpoint-every <n>` takes a hash every `n` ticks to help find the tick where two platforms diverge (CI never changes it).
-Exit status: 0 success, 1 usage or I/O error, 2 a scenario failed.
+`--dump-tick <t> --dump <path>` also writes the canonical hash input at tick `t` (see <<_find_where_two_targets_diverge,below>>); the two options go together.
+Exit status: 0 success, 1 usage or I/O error (including a `--dump-tick` past the end of every selected scenario), 2 a scenario failed (for example a `HashError`: a NaN in the state), 3 the leak detector saw a platform libm call outside its allow-list.
 
 Run the tests, which include the same comparison:
 
@@ -96,7 +96,45 @@ git diff tools/determinism/reference.txt
 ----
 
 A hash that differs on one platform only is a determinism bug, not a reason to regenerate.
-Run with `--checkpoint-every 1` on both platforms and compare the first differing line.
+Find where the platforms diverge as described next.
+
+== Find where two targets diverge
+
+The `determinism` job names the first diverging scenario and tick per target.
+That tick is only a checkpoint, 120 ticks wide, so narrow it down and then look at the bytes:
+
+[source,sh]
+----
+# 1. On both targets, one hash per tick; the first differing line is the tick.
+cargo run --release --locked -p determinism -- --out fine.txt --scenario orbit-coast --checkpoint-every 1
+# 2. On both targets, dump the canonical bytes at that tick (here 481) and diff the dumps.
+cargo run --release --locked -p determinism -- --out fine.txt --scenario orbit-coast --dump-tick 481 --dump dump.txt
+diff -u dump-linux.txt dump-other.txt
+----
+
+A dump line is `<scenario> <tick, 8 digits> <section> <id or -> <hex>`.
+There is one line per section header (`STQH`, `ENTS`, `PILT`, `GLOB`, id `-`) and one per entity (`ENTS`, the ship id) or pilot (`PILT`, the pilot id).
+The hex is the canonical byte stream of ADR 0008 for that line (format version 1), so concatenating the bytes of all lines of one scenario and hashing them with FNV-1a 64 gives the checkpoint hash (a test checks this).
+The first differing line names the entity, and the first differing byte names the field: `f64` values are 8-byte little-endian bit patterns, written in the order of `Ship::state_hash_with_id` (`crates/st-sim/src/sim.rs`).
+Without `--scenario`, the dump has the lines of every scenario that reaches the tick.
+
+== The leak detector
+
+On x86_64 Linux only, the harness binary defines the C math symbols itself (`sin`, `cos`, `pow`, `log2`, `fma` and the rest listed in ADR 0008, with their `f`-suffixed versions).
+Each definition counts its calls and forwards to the pure-Rust `libm` crate, so a call from any dependency into the platform libm is caught instead of silently using glibc.
+After the scenarios the harness prints one line per symbol that was called, then a verdict, on standard output (an illustration of a failing run, not a real one):
+
+----
+leak-detector: log2 3 allowed (Parry's BVH, covered by the `parry_bvh_log2_domain` test)
+leak-detector: cos 1 LEAK
+leak-detector: FAIL, the platform libm was called (see LEAK lines)
+----
+
+A clean run prints `leak-detector: ok, no platform libm call outside the allow-list`.
+Any symbol outside the allow-list (`log2`, `fma` and `fmaf` today, each with its reason in `tools/determinism/src/leak.rs`) makes the harness exit with status 3, after it has written the result file.
+The module is compiled into the binary only, on `cfg(all(target_os = "linux", target_arch = "x86_64"))`; tests and other platforms behave like the game and print nothing.
+It is the one place in the workspace that allows `unsafe` (ADR 0008).
+The simulation does not call the platform libm today, so the current allow-list is unused.
 
 == In CI
 
@@ -105,10 +143,29 @@ Run with `--checkpoint-every 1` on both platforms and compare the first differin
 | Job | Step
 
 | `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`
-| After `cargo test --workspace`: run the harness in release and `diff` with the reference.
+| After `cargo test --workspace`: run the harness in release (on Linux with the leak detector), `diff` with the reference, upload `determinism-<platform>` (the upload runs even when the diff failed).
 
 | `wasm32`
-| Install wasmtime 49.0.2 (the nixpkgs version), run the tests on `wasm32-wasip1`, run the harness and `diff` with the reference.
+| Install wasmtime 49.0.2 (the nixpkgs version), run the tests on `wasm32-wasip1`, run the harness, `diff` with the reference, upload `determinism-wasm32`.
+
+| `determinism`
+| `needs` the four jobs above and runs with `if: ${{ !cancelled() }}`. Its first step fails unless every needed job succeeded. It then downloads the four artifacts, fails unless exactly those four files exist, compares each with `tools/determinism/reference.txt` and every pair with each other byte for byte, and prints the first diverging scenario and tick for each mismatch. It writes a summary table to the job summary.
 |===
 
-No job was added, so the nine required check names are unchanged.
+The artifacts are `determinism-linux-x86_64`, `determinism-windows-x86_64`, `determinism-macos-aarch64` and `determinism-wasm32` (ADR 0003), each holding `<artifact name>.txt`, kept for 7 days.
+Download them from the run page to inspect a failure.
+
+The comparison is `tools/ci/determinism-compare.sh <artifacts-dir> <reference-file>`; run it on a directory laid out like the downloaded artifacts to try it locally.
+It exits 0 when all is equal, 1 on a mismatch or a missing or unexpected file.
+A mismatch report looks like this:
+
+----
+MISMATCH: wasm32 differs from the reference
+first difference at line 5 (scenario orbit-coast, tick 00000480)
+    reference              orbit-coast 00000480 2c4aac5970b09a31
+    wasm32                 orbit-coast 00000480 2c4aac5970b09a3X
+    1 of 38 lines differ
+----
+
+The new job name is `determinism`.
+It is not a required check yet: after its first green run on `main`, the owner adds it to branch protection (ADR 0003), which makes ten required checks.

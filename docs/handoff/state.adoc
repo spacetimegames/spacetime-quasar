@@ -22,7 +22,7 @@ It states where the project stands; the linked pages hold the detail.
 | Protected. Changes go through a pull request with all 9 required checks green and the branch up to date. Merges are squash-only.
 
 | In flight
-| Follow-ups to the determinism harness under SPAC-76 (compare job, leak detector, replay files).
+| Follow-ups to the determinism harness under SPAC-76 (replay files as scenarios). The compare job, leak detector and `--dump-tick` are built (SPAC-125); the owner adds `determinism` to branch protection after its first green run on `main`.
 
 | Blocked
 | None.
@@ -46,6 +46,7 @@ All of this is on `main`.
 * `st-platform` core: filesystem, clock, and a hot-reload watcher behind a feature (PR #21).
 * `st-math`: deterministic scalar math (`det`) and the camera-relative render origin (PR #25); from SPAC-123, Kepler orbits for on-rails bodies (elliptic only, fixed-iteration solver) and `f64` interpolation (lerp, nlerp, slerp, Hermite), with bit-pattern golden tests.
 * `st-sim` (minimal): commands, fixed step, state hash and three scenarios, plus the `determinism` harness in `tools/determinism` (PR #26; xref:../62-determinism-harness.adoc[how to run it]).
+* Determinism comparison (SPAC-125): the four producer jobs upload `determinism-<platform>`, the new `determinism` job compares the four files with each other and with the reference and reports the first diverging scenario and tick; the harness has the x86_64 Linux leak detector (exit status 3) and `--dump-tick`. `determinism` is not in branch protection yet.
 * The flake keeps `.ron` data files in its source filter (PR #22).
 * Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0010, the product decision records PD-01 to PD-34, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
 
@@ -58,14 +59,14 @@ Minimal `st-sim` and the determinism harness are done (SPAC-122; xref:../62-dete
 
 Then, in order:
 
-* The `determinism` compare job (artifact upload of the four outputs), the leak detector and replay files as scenarios.
+* Replay files as scenarios for the determinism harness.
 * `st-data` hot-reload wiring.
 * The Phase 1 CLI demo: it hot-reloads a `.ron` value and prints validated values plus a deterministic replay hash.
 * The Phase 1 hands-on test.
 
 == Known problems
 
-* The `determinism` compare job and the artifact uploads of ADR 0003 are not built yet; each platform job diffs with the committed reference instead. The golden tests of `st-math`, `st-rng`, `st-time`, `st-sim` and `st-data` run on `wasm32-wasip1` under wasmtime in the `wasm32` job.
+* The `determinism` job is not a required check until the owner adds it after its first green run on `main`. The golden tests of `st-math`, `st-rng`, `st-time`, `st-sim` and `st-data` run on `wasm32-wasip1` under wasmtime in the `wasm32` job.
 * The non-Nix `cargo build` path and MSRV 1.88 are verified only in CI.
 
 == Open owner questions
