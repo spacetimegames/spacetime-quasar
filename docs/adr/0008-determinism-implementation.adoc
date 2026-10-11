@@ -65,7 +65,7 @@ development machine (Intel Core i9-11980HK, Linux, glibc 2.44):
   `simba/libm_force`, `indexmap`, `glamx/libm` and `glamx/scalar-math`.
 * Under it, Rapier and Parry replace hash maps with `IndexMap`
   (insertion-ordered), and Rapier's contact solver canonicalises `-0.0` to
-  `+0.0`. Enabling `simd8` together with it is a `compile_error!`.
+  `+0.0`.
 * The solver always uses 4-lane SIMD (`SimdReal = simba::simd::WideF64x4`,
   backed by `wide`): SSE2 on x86_64, NEON on aarch64, scalar fallback on
   wasm32 without `simd128`. Lane-wise IEEE operations give the same results
@@ -173,9 +173,18 @@ development machine (Intel Core i9-11980HK, Linux, glibc 2.44):
   `st-time`, `st-rng`, `st-data` and the determinism harness
   (`tools/determinism`).
 * A crate is a sim crate if `st-sim` depends on it (normal dependency, at any
-  depth inside the workspace), if its output becomes simulation state, or if
-  it drives the simulation. `st-sim` depends only on sim crates and on
-  dependencies admitted for it.
+  depth inside the workspace), or if its output becomes simulation state
+  other than through commands passed to `Sim::step`. `st-sim` depends only
+  on sim crates and on dependencies admitted for it.
+* `st-sim` owns the deterministic fixed step: `Sim::step` advances exactly
+  one tick of `DT` (defined in `st-time`), and the tick counter is
+  simulation state in `st-sim`. `st-time` is a sim crate because `st-sim`
+  depends on it. The session loop in `st-game` owns only real-time pacing:
+  it hands elapsed real time from `st-platform` to `st-time`, which returns
+  how many ticks are due, then calls `Sim::step` once per due tick with that
+  tick's commands and reads state afterwards.
+  The harness calls `Sim::step` a fixed number of times instead. Calling
+  `Sim::step` does not make a crate a sim crate.
 * *Exempt crates* are `st-render`, `st-hud`, `st-audio`, `st-materials`,
   `st-geometry`, `st-game`, `st-platform`, `apps/spacetime-quasar` and
   `tools/xtask`. Each opts out of the clippy rules below with this line among
@@ -351,8 +360,7 @@ every target.
 === Physics configuration and how leaks are neutralised
 
 * Rapier features are as in ADR 0007: `dim3`, `f64`, `alloc`,
-  `enhanced-determinism`. `parallel`, `simd8`, `block-solver` and `std` are
-  off.
+  `enhanced-determinism`. `parallel`, `block-solver` and `std` are off.
 * *One collider per body.* Each rigid body has exactly one collider,
   attached at the body origin (identity position relative to the parent). A
   ship's hull is one `ColliderBuilder::compound(Vec<(Pose, SharedShape)>)`
@@ -559,7 +567,9 @@ every target.
   `<scenario> <tick> <hash>`. The tick is zero-padded to 8 digits and the
   hash is 16 lowercase hex digits, so byte order equals the intended order.
   Lines are sorted, LF-terminated, with a final newline.
-* *Scenario `physics-swarm` (Phase 1)* is the probe above made permanent:
+* *Scenario `physics-swarm` (Phase 1)* is the probe above made permanent.
+  Its setup and per-tick driver live in `st_sim::scenarios` (ADR 0007), so
+  the harness needs no Rapier or Parry dependency:
 ** 200 ships at least 500 km from the system origin;
 ** each a single compound collider of three or more varied parts with
    explicit mass properties;

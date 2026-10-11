@@ -164,8 +164,8 @@ Conversions happen only at these places:
   deterministic.
 . *Simulation to physics, and back:* none. Both sides use the same types.
 . *Simulation to render:* in one place, `st_math`'s render origin (ADR 0007).
-  `RenderOrigin::to_render(p: DVec3) -> Vec3` subtracts the origin in f64
-  and rounds once with `as_vec3()`. Orientations are converted with
+  `RenderOrigin::to_render(&self, p: DVec3) -> Vec3` subtracts the origin
+  in f64 and rounds once with `as_vec3()`. Orientations are converted with
   `DQuat::as_quat()`. Interpolation between two simulation ticks
   (`st-math` interpolation helpers) is done in f64, before the conversion.
 . *Render to GPU:* glam values are written into plain-old-data structs with
@@ -262,7 +262,10 @@ dependency.
 == Alternatives considered
 
 nalgebra for simulation and physics, glam for rendering (the boundary the charter anticipated)::
-  Rapier 0.33 and later no longer expose nalgebra in their rigid-body API.
+  Since `rapier3d-f64` 0.32.0 (the first release that depends on `glamx`;
+  0.31.0 does not), the rigid-body API takes glam types through Parry's
+  math aliases (verified in the 0.32.0 sources). nalgebra remains a
+  dependency, used by Rapier's internal SIMD code.
   Keeping nalgebra on our side would add conversions at every physics call
   for no benefit.
 nalgebra everywhere::

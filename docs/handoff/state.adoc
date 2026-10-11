@@ -49,11 +49,9 @@ Phase 1 (Base crates) comes next.
 
 Phase 1 ADRs:
 
-* `nalgebra` vs `glam` boundary.
-* Large-world coordinates and f32 vs f64. It uses the answered space-scale decision (PD-26).
-* Determinism implementation.
-* Command log and replay format.
-* Data schema versioning.
+* Decided, pending merge of PR #16: math library boundary, glam only (xref:../adr/0006-math-library-boundary.adoc[ADR 0006]); large-world coordinates, f64 simulation and f32 render space, from the space-scale decision PD-26 (xref:../adr/0007-large-world-coordinates.adoc[ADR 0007]); determinism implementation (xref:../adr/0008-determinism-implementation.adoc[ADR 0008]).
+* Decided: data schema versioning (xref:../adr/0010-data-schema-versioning.adoc[ADR 0010]).
+* Open: command log and replay format (ADR 0009).
 
 Then the Phase 1 crates and tooling:
 

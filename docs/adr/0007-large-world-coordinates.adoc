@@ -134,7 +134,7 @@ plausible tuning; it is not a gameplay decision.
 | every coordinate within ±2^23 m (8,388,608 m) of the system origin
 | More than 4 times the derived extent. `st-data` rejects content placed
   outside it; `st-sim` reports bodies that leave it. What happens to a ship
-  at the bound is a gameplay question (see Consequences).
+  at the bound is a gameplay question (see <<_open_product_questions>>).
 |===
 
 Precision does not depend on this bound, because f64 keeps sub-millimetre
@@ -174,6 +174,18 @@ this rule:
 * *Conversion.* A render-space position is `r = (p - O).as_vec3()`: the
   subtraction happens in f64 and the result is rounded once to f32. This is
   the only sim-to-render position conversion (ADR 0006).
+* *API.* The public items are:
+** `RenderOrigin::new(camera: DVec3) -> Self` sets `O` to the grid point
+   nearest `camera`. It is also the reset on a system change (below).
+** `RenderOrigin::rebase(&mut self, camera: DVec3) -> DVec3` applies the
+   rebase check above and returns `ΔO`, or `DVec3::ZERO` when `O` did not
+   move. The renderer calls it once per frame, first.
+** `RenderOrigin::to_render(&self, p: DVec3) -> Vec3` is the conversion
+   above (the ADR 0006 conversion point).
+** `RenderOrigin::origin(&self) -> DVec3` returns `O`.
++
+Helpers built on `to_render` (for example for orientations or batches) are
+the Builder's choice; they must not add a second conversion path.
 * *Views.* All views of a frame (N-view, stereo) share one `O`. View
   matrices are built in f32 from `c - O`.
 * *Persistent GPU data.* On a rebase, the renderer shifts data that lives in
@@ -240,8 +252,13 @@ Rendering (f32 render space):
 rapier3d-f64 = { version = "0.36.1", default-features = false, features = ["dim3", "f64", "alloc", "enhanced-determinism"] }
 ----
 +
-Only `st-sim` depends on it; the determinism harness reaches it through
-`st-sim`.
+Only `st-sim` depends on it. Scenario code that needs Rapier or Parry
+types, such as the ADR 0008 `physics-swarm` setup (compound colliders,
+explicit mass properties, `LockedAxes`, CCD) and its per-tick Parry shape
+casts, lives in `st-sim` as a public `scenarios` module. The module takes a
+seed and returns a ready `Sim` plus a per-tick driver, so its signatures
+carry no Rapier or Parry types. The determinism harness calls that module
+and has no direct `rapier3d-f64` or `parry3d-f64` dependency.
 * Parry is used through `rapier3d_f64::parry`, with no direct `parry3d-f64`
   dependency. That gives one Parry version, with features set by Rapier. If
   a direct dependency ever becomes necessary, it must use exactly Rapier's
@@ -254,8 +271,7 @@ Only `st-sim` depends on it; the determinism harness reaches it through
    necessary but not sufficient.
 ** Off: `block-solver` (in the f64 crate's defaults, but its own manifest
    comment calls it an experimental opt-in that "introduces jitter in the 3D
-   domino demo"); `parallel` (ADR 0008); `simd8` (a compile error together
-   with `enhanced-determinism`); `serde-serialize` (ADR 0009 decides);
+   domino demo"); `parallel` (ADR 0008); `serde-serialize` (ADR 0009 decides);
    `debug-render` and `profiler` (not needed).
 * *MSRV.* The workspace MSRV moves from 1.88 to 1.89, because `nalgebra`
   0.35 and `wide` 1.x require it. 1.89 is below the current NixOS stable
@@ -294,9 +310,11 @@ Fixed-point integer positions (for example `i64` micrometres) with local float p
   Rapier has no fixed-point mode, so every tick would re-derive local
   frames. That is exact but heavy; f64 already gives nanometre spacing.
 `rapier3d` (f32) with system frames kept small::
-  PD-26 puts bodies 60 to 240 km apart. At those distances f32 spacing is 4
-  to 16 mm and the velocity quantum 0.5 to 2 m/s, which visibly breaks
-  docking and slow flight.
+  Under the PD-26 envelope, adjacent bodies are up to 120 km apart and the
+  outermost about 2,000 km from the primary, so ships routinely fly 60 to
+  240 km and more from the system origin. At 60 to 240 km, f32 spacing is 4
+  to 16 mm and the velocity quantum 0.5 to 2 m/s, and both grow further
+  out, which visibly breaks docking and slow flight.
 Render origin moved to the camera every frame::
   Best precision near the camera, but every persistent GPU buffer would be
   shifted every frame by a non-representable amount, accumulating error. The
@@ -327,13 +345,24 @@ Logarithmic depth::
 * The validity bound and the speed envelope are engineering assumptions.
   Content that exceeds them needs this ADR revisited, though f64 itself
   would not be the limit.
-* *Product questions (not decided here):* (1) whether the speed envelope
-  (normal at most 1,000 m/s, cruise at most 10 times, systems about 2,000 km
-  in radius) fits the intended feel; (2) what happens when a ship reaches the
-  edge of a system (a soft boundary, a forced turn-back, or nothing).
 * Revisit if PD-26 changes to realistic scale (f64 still holds, but the
   render rules and the bound need review), or if Rapier or Parry drop the
   f64 crates.
+
+=== Open product questions
+
+Each item is an assumption this ADR builds on, pending owner confirmation.
+A different answer may need this ADR revisited.
+
+. *Speed envelope.* Assumed: normal flight at most 1,000 m/s, cruise at
+  most 10 times normal speed, and systems about 2,000 km in radius (the
+  extent table above).
+. *System edge.* Assumed: a soft boundary. A ship flying past the edge of
+  its system gets a warning, then is slowed down or pushed back, so it never
+  reaches the validity bound.
+. *Replays across game versions.* Assumed: replays are version-locked and
+  play back only in the simulation version that recorded them (ADR 0008),
+  while saves are upgrade-safe per ADR 0010.
 
 == References
 
