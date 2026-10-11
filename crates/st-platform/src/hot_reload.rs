@@ -569,7 +569,35 @@ impl Watcher {
     /// # std::fs::remove_dir_all(&dir).unwrap();
     /// ```
     pub fn requeue(&mut self, batch: &ChangeBatch) {
-        for change in &batch.changes {
+        self.requeue_changes(&batch.changes);
+    }
+
+    /// Like [`Watcher::requeue`], for only some of a batch's changes.
+    ///
+    /// A consumer that rejects a batch because of one file hands back the
+    /// innocent files and drops the guilty one, which is reported once and
+    /// returns only when it is edited again. A removed file that is not handed
+    /// back is not reported again.
+    ///
+    /// ```
+    /// use st_platform::{Watcher, WatcherConfig};
+    /// use st_time::Nanos;
+    ///
+    /// # let dir = std::env::temp_dir().join(format!("st-platform-doc-requeue-some-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&dir).unwrap();
+    /// let mut watcher = Watcher::new(WatcherConfig::new());
+    /// watcher.watch_root(&dir);
+    /// # while watcher.sweeps_completed() == 0 { watcher.poll(Nanos::ZERO); }
+    /// # std::fs::write(dir.join("a.ron"), "x").unwrap();
+    /// # while watcher.sweeps_completed() < 2 { watcher.poll(Nanos::ZERO); }
+    /// if let Some(batch) = watcher.poll(Nanos::from_secs(1)) {
+    ///     // Hand back every change except the first.
+    ///     watcher.requeue_changes(batch.changes().iter().skip(1));
+    /// }
+    /// # std::fs::remove_dir_all(&dir).unwrap();
+    /// ```
+    pub fn requeue_changes<'a>(&mut self, changes: impl IntoIterator<Item = &'a Change>) {
+        for change in changes {
             // A later batch already reported a newer state: nothing to undo.
             if self.reported.get(&change.path).copied() != change.released {
                 continue;
