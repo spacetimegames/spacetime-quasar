@@ -2,9 +2,9 @@
 //!
 //! Every function is checked on at least 16 inputs against expected results committed as
 //! IEEE-754 bit patterns, so a change in `libm` (or any platform difference in the way it
-//! is built) shows up as a failing test on every target. The transcendental tables were
-//! produced with `libm` 0.2.16 and cross-checked against a platform libm to within 2 ulp,
-//! so they pin the values and are not merely a snapshot of whatever the crate returned.
+//! is built) shows up as a failing test on every target. The transcendental tables are bit
+//! patterns recorded from `st_math::det` (libm 0.2.16) on the reference dev machine; they
+//! are the cross-platform contract, not an independent check against another libm.
 //! The `min`, `max`, `clamp` and `powi` tables were checked by hand against the
 //! definitions in the documentation.
 

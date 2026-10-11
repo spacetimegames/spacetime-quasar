@@ -1,4 +1,4 @@
-//! Coordinate frames, large-world translation, orbit and interpolation math.
+//! Deterministic scalar math and the large-world render origin.
 //!
 //! This crate provides deterministic math for simulation code and the one place where
 //! simulation positions become render positions.
@@ -15,6 +15,9 @@
 //! * [`glam`], re-exported unchanged, so that a consumer can name the exact glam version
 //!   this crate was built with. There are no wrapper types around vectors, quaternions or
 //!   matrices.
+//!
+//! Non-goals: orbit (Kepler) and interpolation math are planned in a separate Subtask and
+//! are not provided yet.
 //!
 //! Operations that can fail on bad input return `Option` or `Result` or a documented
 //! fallback; nothing here panics on misuse.
