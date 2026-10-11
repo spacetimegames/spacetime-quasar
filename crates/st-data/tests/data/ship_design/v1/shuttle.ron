@@ -1,0 +1,9 @@
+// Version 1: name and mass only.
+(
+    kind: "ship_design",
+    version: 1,
+    data: (
+        name: "Shuttle",
+        mass: 12.5,
+    ),
+)

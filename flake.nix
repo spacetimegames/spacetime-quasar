@@ -56,12 +56,16 @@
           inherit (pkgs) lib;
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-          # Cargo sources plus the config files the checks read.
+          # Cargo sources plus the config files the checks read, and `.ron` data files
+          # (ADR 0010: `assets/**/*.ron`, `crates/*/tests/data/**/*.ron`) that tests read
+          # with `include_str!` or from `assets/`. A suffix predicate keeps the set
+          # minimal: docs and other files stay out, so editing them does not rebuild.
           src = lib.cleanSourceWith {
             src = ./.;
             filter =
               path: type:
               (craneLib.filterCargoSources path type)
+              || lib.hasSuffix ".ron" path
               || builtins.elem (baseNameOf path) [
                 "deny.toml"
                 "rustfmt.toml"
