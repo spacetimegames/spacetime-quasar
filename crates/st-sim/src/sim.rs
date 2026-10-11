@@ -1101,6 +1101,25 @@ mod tests {
     }
 
     #[test]
+    fn weapon_extent_cap_boundary() {
+        let cap = MAX_WEAPON_EXTENT;
+        let above = f64::from_bits(cap.to_bits() + 1);
+        let with = |range: f64, radius: f64| {
+            let mut s = setup();
+            s.ships[0].weapon = Some(Weapon {
+                range,
+                damage: 1.0,
+                radius,
+                cooldown_ticks: 1,
+            });
+            Sim::new(&s, 0).map(|_| ())
+        };
+        assert_eq!(with(cap, cap), Ok(()));
+        assert_eq!(with(above, cap), Err(SetupError::BadWeapon(1)));
+        assert_eq!(with(cap, above), Err(SetupError::BadWeapon(1)));
+    }
+
+    #[test]
     fn setup_errors() {
         let mut s = setup();
         s.ships[0].hull.clear();
