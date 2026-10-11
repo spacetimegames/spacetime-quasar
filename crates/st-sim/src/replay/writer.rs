@@ -46,7 +46,7 @@ struct OpenSegment {
 /// use st_sim::replay::{ReplayHeader, ReplayWriter};
 /// use st_sim::{Setup, Sim};
 ///
-/// let setup = Setup { ships: Vec::new(), pilots: Vec::new(), gravity_mu: 0.0 };
+/// let setup = Setup { ships: Vec::new(), pilots: Vec::new(), ai_pilots: Vec::new(), gravity_mu: 0.0 };
 /// let mut sim = Sim::new(&setup, 7)?;
 /// let header = ReplayHeader::new(&st_data::data_set_hash(&[])?, 7, "doc", Vec::new());
 /// let writer = ReplayWriter::new(&header, &setup, sim.state_hash()?)?;

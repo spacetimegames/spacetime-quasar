@@ -41,9 +41,10 @@
 //! # Ok::<(), wire::WireError>(())
 //! ```
 
-use st_math::glam::DVec3;
+use st_math::glam::{DQuat, DVec3};
 
 use super::{CommandKind, ControlState, PilotId};
+use crate::hull::{HullPart, PartShape, Weapon};
 use crate::sim::{Setup, ShipInit};
 
 /// Wire tag of [`CommandKind::Controls`]. Tags are never reused, even after
@@ -455,10 +456,17 @@ pub fn decode_frame(d: &mut Decoder<'_>) -> Result<(u64, u64, CommandKind), Wire
 
 // ---- The simulation setup -------------------------------------------------
 
-/// The fewest bytes one encoded ship takes.
-const SHIP_BYTES: usize = 8 + 8 + 3 * 8 + 3 * 8 + 4 * 8;
+/// The fewest bytes one encoded ship takes: ids, pose, motion, four dynamics numbers,
+/// the continuous-detection flag, the team, the hit points, the weapon flag and an
+/// empty hull's count.
+const SHIP_BYTES: usize = 8 + 8 + 3 * 8 + 3 * 8 + 4 * 8 + 1 + 4 + 8 + 1 + 1;
+/// The fewest bytes one encoded hull part takes: the shape tag, a ball's radius, the
+/// offset, the rotation and the density.
+const PART_BYTES: usize = 1 + 8 + 3 * 8 + 4 * 8 + 8;
 /// The fewest bytes one encoded pilot takes: its id and the option tag.
 const PILOT_BYTES: usize = 8 + 1;
+/// The bytes one encoded AI pilot takes: its id and its ship.
+const AI_PILOT_BYTES: usize = 8 + 8;
 
 fn put_vec3(out: &mut Vec<u8>, v: DVec3) -> Result<(), WireError> {
     put_f64(out, v.x)?;
@@ -470,9 +478,57 @@ fn get_vec3(d: &mut Decoder<'_>) -> Result<DVec3, WireError> {
     Ok(DVec3::new(d.f64()?, d.f64()?, d.f64()?))
 }
 
-/// Appends the encoding of a setup: the ships in order, the pilots in order
-/// and the attractor strength. The layout belongs to `st-sim` and follows
-/// [`SIM_VERSION`](crate::SIM_VERSION).
+fn put_part(out: &mut Vec<u8>, p: &HullPart) -> Result<(), WireError> {
+    match p.shape {
+        PartShape::Cuboid { half_extents } => {
+            out.push(0);
+            put_vec3(out, half_extents)?;
+        }
+        PartShape::Ball { radius } => {
+            out.push(1);
+            put_f64(out, radius)?;
+        }
+        PartShape::Cylinder {
+            half_height,
+            radius,
+        } => {
+            out.push(2);
+            put_f64(out, half_height)?;
+            put_f64(out, radius)?;
+        }
+    }
+    put_vec3(out, p.offset)?;
+    for q in p.rotation.to_array() {
+        put_f64(out, q)?;
+    }
+    put_f64(out, p.density)
+}
+
+fn get_part(d: &mut Decoder<'_>) -> Result<HullPart, WireError> {
+    let shape = match d.u8()? {
+        0 => PartShape::Cuboid {
+            half_extents: get_vec3(d)?,
+        },
+        1 => PartShape::Ball { radius: d.f64()? },
+        2 => PartShape::Cylinder {
+            half_height: d.f64()?,
+            radius: d.f64()?,
+        },
+        _ => return Err(WireError::Invalid("unknown hull part shape")),
+    };
+    let offset = get_vec3(d)?;
+    let rotation = DQuat::from_xyzw(d.f64()?, d.f64()?, d.f64()?, d.f64()?);
+    Ok(HullPart {
+        shape,
+        offset,
+        rotation,
+        density: d.f64()?,
+    })
+}
+
+/// Appends the encoding of a setup: the ships in order (each with its hull and
+/// weapon), the pilots in order, the AI pilots in order and the attractor strength.
+/// The layout belongs to `st-sim` and follows [`SIM_VERSION`](crate::SIM_VERSION).
 ///
 /// # Errors
 ///
@@ -488,6 +544,23 @@ pub fn encode_setup(out: &mut Vec<u8>, setup: &Setup) -> Result<(), WireError> {
         put_f64(out, s.max_accel)?;
         put_f64(out, s.max_turn_rate)?;
         put_f64(out, s.drag)?;
+        out.push(u8::from(s.ccd));
+        out.extend_from_slice(&s.team.to_le_bytes());
+        put_f64(out, s.hit_points)?;
+        match &s.weapon {
+            Some(w) => {
+                out.push(1);
+                put_f64(out, w.range)?;
+                put_f64(out, w.damage)?;
+                put_f64(out, w.radius)?;
+                out.extend_from_slice(&w.cooldown_ticks.to_le_bytes());
+            }
+            None => out.push(0),
+        }
+        put_varint(out, s.hull.len() as u64);
+        for part in &s.hull {
+            put_part(out, part)?;
+        }
     }
     put_varint(out, setup.pilots.len() as u64);
     for &(id, controlled) in &setup.pilots {
@@ -499,6 +572,11 @@ pub fn encode_setup(out: &mut Vec<u8>, setup: &Setup) -> Result<(), WireError> {
             }
             None => out.push(0),
         }
+    }
+    put_varint(out, setup.ai_pilots.len() as u64);
+    for &(id, ship) in &setup.ai_pilots {
+        out.extend_from_slice(&id.0.to_le_bytes());
+        out.extend_from_slice(&ship.to_le_bytes());
     }
     put_f64(out, setup.gravity_mu)
 }
@@ -513,15 +591,46 @@ pub fn decode_setup(d: &mut Decoder<'_>) -> Result<Setup, WireError> {
     let ship_count = d.count(SHIP_BYTES)?;
     let mut ships = Vec::with_capacity(ship_count);
     for _ in 0..ship_count {
+        let id = d.u64()?;
+        let system = d.u64()?;
+        let position = get_vec3(d)?;
+        let velocity = get_vec3(d)?;
+        let heading = d.f64()?;
+        let max_accel = d.f64()?;
+        let max_turn_rate = d.f64()?;
+        let drag = d.f64()?;
+        let ccd = d.flag()?;
+        let team = d.u32()?;
+        let hit_points = d.f64()?;
+        let weapon = if d.flag()? {
+            Some(Weapon {
+                range: d.f64()?,
+                damage: d.f64()?,
+                radius: d.f64()?,
+                cooldown_ticks: d.u32()?,
+            })
+        } else {
+            None
+        };
+        let part_count = d.count(PART_BYTES)?;
+        let mut hull = Vec::with_capacity(part_count);
+        for _ in 0..part_count {
+            hull.push(get_part(d)?);
+        }
         ships.push(ShipInit {
-            id: d.u64()?,
-            system: d.u64()?,
-            position: get_vec3(d)?,
-            velocity: get_vec3(d)?,
-            heading: d.f64()?,
-            max_accel: d.f64()?,
-            max_turn_rate: d.f64()?,
-            drag: d.f64()?,
+            id,
+            system,
+            position,
+            velocity,
+            heading,
+            max_accel,
+            max_turn_rate,
+            drag,
+            hull,
+            ccd,
+            team,
+            hit_points,
+            weapon,
         });
     }
     let pilot_count = d.count(PILOT_BYTES)?;
@@ -531,10 +640,16 @@ pub fn decode_setup(d: &mut Decoder<'_>) -> Result<Setup, WireError> {
         let controlled = if d.flag()? { Some(d.u64()?) } else { None };
         pilots.push((id, controlled));
     }
+    let ai_count = d.count(AI_PILOT_BYTES)?;
+    let mut ai_pilots = Vec::with_capacity(ai_count);
+    for _ in 0..ai_count {
+        ai_pilots.push((PilotId(d.u64()?), d.u64()?));
+    }
     let gravity_mu = d.f64()?;
     Ok(Setup {
         ships,
         pilots,
+        ai_pilots,
         gravity_mu,
     })
 }
@@ -549,8 +664,8 @@ pub fn decode_setup(d: &mut Decoder<'_>) -> Result<Setup, WireError> {
 /// `SIM_VERSION`. The sample is: pilot 1 sets full thrust and full left
 /// strafe (`seq` field 1); the same pilot then turns with an aim and buttons
 /// (field 1, a difference of one); pilot 300 sends default controls with a
-/// two-byte pilot and `seq` field 128; then the setup of one ship and two
-/// pilots.
+/// two-byte pilot and `seq` field 128; then the setup of one ship with a
+/// three-part hull and a weapon, two pilots and one AI pilot.
 ///
 /// ```
 /// use st_sim::command::wire;
@@ -594,8 +709,43 @@ pub fn golden_bytes() -> Vec<u8> {
             max_accel: 25.0,
             max_turn_rate: 1.5,
             drag: 0.01,
+            hull: vec![
+                HullPart {
+                    shape: PartShape::Cuboid {
+                        half_extents: DVec3::new(1.0, 0.5, 2.0),
+                    },
+                    offset: DVec3::new(0.0, 0.0, 1.0),
+                    rotation: DQuat::IDENTITY,
+                    density: 100.0,
+                },
+                HullPart {
+                    shape: PartShape::Ball { radius: 0.75 },
+                    offset: DVec3::new(0.5, 0.0, -1.0),
+                    rotation: DQuat::IDENTITY,
+                    density: 50.0,
+                },
+                HullPart {
+                    shape: PartShape::Cylinder {
+                        half_height: 1.5,
+                        radius: 0.25,
+                    },
+                    offset: DVec3::new(-0.5, 0.0, 0.0),
+                    rotation: DQuat::from_xyzw(0.0, 0.0, 0.0, 1.0),
+                    density: 25.0,
+                },
+            ],
+            ccd: true,
+            team: 3,
+            hit_points: 200.0,
+            weapon: Some(Weapon {
+                range: 800.0,
+                damage: 5.0,
+                radius: 0.5,
+                cooldown_ticks: 12,
+            }),
         }],
         pilots: vec![(PilotId(1), Some(7)), (PilotId(2), None)],
+        ai_pilots: vec![(PilotId(3), 7)],
         gravity_mu: 1.0e9,
     };
     // The sample is finite, so encoding cannot fail; the unit test would
@@ -787,8 +937,14 @@ mod tests {
                 max_accel: 1.0,
                 max_turn_rate: 1.0,
                 drag: 0.0,
+                ccd: false,
+                team: u32::MAX,
+                hit_points: f64::MAX,
+                weapon: None,
+                ..ShipInit::default()
             }],
             pilots: vec![(PilotId(3), None), (PilotId(1), Some(u64::MAX))],
+            ai_pilots: vec![(PilotId(9), 5)],
             gravity_mu: 1.0,
         };
         encode_setup(&mut out, &setup).unwrap();
@@ -808,6 +964,7 @@ mod tests {
         let mut setup = Setup {
             ships: Vec::new(),
             pilots: Vec::new(),
+            ai_pilots: Vec::new(),
             gravity_mu: f64::NAN,
         };
         assert_eq!(
@@ -843,10 +1000,12 @@ mod tests {
         .concat()
         .replace(' ', "");
         assert!(hex.starts_with(&frames), "{hex}");
-        // The tail is the setup: ship count, one ship of 96 bytes, pilot count,
-        // two pilots of 17 and 9 bytes, and the attractor strength.
+        // The tail is the setup: ship count, one ship of 382 bytes (96, the flag, team, hit points,
+        // a 29-byte weapon, a hull count and parts of 89, 73 and 81 bytes), pilot count,
+        // two pilots of 17 and 9 bytes, the AI pilot count, one AI pilot of 16 bytes and
+        // the attractor strength.
         let tail = &bytes[frames.len() / 2..];
-        assert_eq!(tail.len(), 1 + 96 + 1 + 17 + 9 + 8);
+        assert_eq!(tail.len(), 1 + 382 + 1 + 17 + 9 + 1 + 16 + 8);
         assert_eq!(tail[0], 1);
         assert!(tail.ends_with(&1.0e9_f64.to_bits().to_le_bytes()));
     }

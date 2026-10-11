@@ -189,15 +189,15 @@ fn build_with_times(env: &SpaceEnvelope) -> Result<(Scenario, f64, f64), ReplayE
         return Err(ReplayError::TooLong { seconds: slowest });
     }
 
+    // Both ships start on the +Z axis side by side and fly along +Z (heading 0), 100 m
+    // apart on x so that their hulls do not overlap.
     let ship = |id: u64| ShipInit {
         id,
-        system: 0,
-        position: DVec3::new(-radius_m, 0.0, 0.0),
-        velocity: DVec3::ZERO,
-        heading: 0.0,
+        position: DVec3::new(100.0 * id as f64, 0.0, -radius_m),
         max_accel: accel,
         max_turn_rate: 0.0,
         drag: 0.0,
+        ..ShipInit::default()
     };
     let mut commands = Vec::new();
     for (pilot, trip) in [(1_u64, &normal), (2, &cruise)] {
@@ -220,6 +220,7 @@ fn build_with_times(env: &SpaceEnvelope) -> Result<(Scenario, f64, f64), ReplayE
         setup: Setup {
             ships: vec![ship(1), ship(2)],
             pilots: vec![(PilotId(1), Some(1)), (PilotId(2), Some(2))],
+            ai_pilots: Vec::new(),
             gravity_mu: 0.0,
         },
         commands,

@@ -309,7 +309,11 @@ fn another_simulation_version_is_refused_unless_forced() {
         let pos = st_sim::replay::MAGIC.len();
         let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
         let text = String::from_utf8(bytes[pos + 8..pos + 8 + len].to_vec()).unwrap();
-        let edited = text.replacen("sim_version: 1,", "sim_version: 99,", 1);
+        let edited = text.replacen(
+            &format!("sim_version: {},", st_sim::SIM_VERSION),
+            "sim_version: 99,",
+            1,
+        );
         assert_ne!(text, edited);
         let mut head = Vec::new();
         head.extend_from_slice(b"HEAD");
@@ -331,7 +335,10 @@ fn another_simulation_version_is_refused_unless_forced() {
     let stderr = String::from_utf8(refused.stderr).unwrap();
     assert!(stderr.contains("simulation version 99"), "{stderr}");
     assert!(
-        stderr.contains("plays simulation version 1 only"),
+        stderr.contains(&format!(
+            "plays simulation version {} only",
+            st_sim::SIM_VERSION
+        )),
         "{stderr}"
     );
 

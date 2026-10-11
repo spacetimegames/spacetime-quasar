@@ -3,9 +3,8 @@
 //! `sim-version.txt` is append-only. Each line is
 //! `<sim version> <FNV-1a 64 of the pinned lines> <FNV-1a 64 of the wire golden bytes>`,
 //! both hashes as 16 lower-case hex digits. The pinned lines are the lines of
-//! `reference.txt` that belong to a code-defined scenario (every scenario
-//! except `data-fixtures`, which loads data and is guarded by the `st-data`
-//! golden tests) and their `.replay` lines, joined in file order with LF. The
+//! `reference.txt` of the three scenarios ADR 0009 names (`physics-swarm`,
+//! `math-kernels`, `combat-60s`) and their `.replay` lines, joined in file order with LF. The
 //! last line must match `st_sim::SIM_VERSION` and both current hashes, so a
 //! change of behaviour or encoding cannot merge without a new line and a new
 //! `SIM_VERSION`.
@@ -15,9 +14,11 @@ use determinism::replays::fnv1a64;
 const REFERENCE: &str = include_str!("../reference.txt");
 const PIN: &str = include_str!("../sim-version.txt");
 
-/// Scenarios whose lines do not move the pin: their content is data, not
-/// simulation behaviour.
-const UNPINNED: [&str; 1] = ["data-fixtures"];
+/// The scenarios whose lines are pinned (ADR 0009, "Version policy"). The others are
+/// `data-fixtures`, whose content is data and is guarded by the `st-data` golden tests,
+/// and the three interim scenarios (`solo-burn`, `orbit-coast`, `swarm-controls`), which
+/// keep the harness quick to localise a divergence but are not part of the replay contract.
+const PINNED: [&str; 3] = ["combat-60s", "math-kernels", "physics-swarm"];
 
 fn pinned_lines() -> String {
     let lines: Vec<&str> = REFERENCE
@@ -25,7 +26,7 @@ fn pinned_lines() -> String {
         .filter(|line| {
             let name = line.split(' ').next().unwrap_or("");
             let scenario = name.strip_suffix(".replay").unwrap_or(name);
-            !UNPINNED.contains(&scenario)
+            PINNED.contains(&scenario)
         })
         .collect();
     lines.join("\n")
@@ -86,11 +87,16 @@ fn the_pin_file_is_append_only_in_form() {
 }
 
 #[test]
-fn the_pinned_lines_include_replays_and_leave_out_the_data_fixtures() {
+fn the_pinned_lines_are_the_three_named_scenarios_and_their_replays() {
     let lines = pinned_lines();
-    assert!(lines.contains("solo-burn.replay "));
-    assert!(lines.contains("swarm-controls.replay "));
+    assert!(lines.contains("physics-swarm "));
+    assert!(lines.contains("physics-swarm.replay "));
+    assert!(lines.contains("combat-60s "));
+    assert!(lines.contains("combat-60s.replay "));
     assert!(lines.contains("math-kernels "));
     assert!(!lines.contains("data-fixtures"));
+    for interim in ["solo-burn", "orbit-coast", "swarm-controls"] {
+        assert!(!lines.contains(interim), "{interim} is not pinned");
+    }
     assert!(!lines.ends_with('\n'));
 }

@@ -13,6 +13,10 @@ st-sim = { path = "../../crates/st-sim" }
 # The fixture schema of the `data-fixtures` scenario derives these (ADR 0010).
 serde.workspace = true
 
+# The Parry log2 test (ADR 0008) compares the platform log2 with libm on every target.
+[dev-dependencies]
+libm.workspace = true
+
 # The leak detector (ADR 0008) forwards the C math symbols to libm. It is
 # compiled on x86_64 Linux only.
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]

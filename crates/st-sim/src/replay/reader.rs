@@ -117,7 +117,7 @@ fn load_header(payload: &[u8]) -> Result<ReplayHeader, ReplayError> {
 /// use st_sim::replay::{ReplayHeader, ReplayWriter, read_header};
 /// use st_sim::{Setup, Sim};
 ///
-/// let setup = Setup { ships: Vec::new(), pilots: Vec::new(), gravity_mu: 0.0 };
+/// let setup = Setup { ships: Vec::new(), pilots: Vec::new(), ai_pilots: Vec::new(), gravity_mu: 0.0 };
 /// let sim = Sim::new(&setup, 9)?;
 /// let header = ReplayHeader::new(&st_data::data_set_hash(&[])?, 9, "doc", vec![1]);
 /// let bytes = ReplayWriter::new(&header, &setup, sim.state_hash()?)?.finish(0, sim.state_hash()?)?;

@@ -58,7 +58,7 @@ fn the_same_data_gives_the_same_hash() {
 fn the_fixture_hash_is_pinned() {
     let replay = scenario::replay(&envelope(&fixture())).unwrap();
     assert_eq!(replay.ticks, 481_200);
-    assert_eq!(format!("{:016x}", replay.hash), "a9089ca937be4c77");
+    assert_eq!(format!("{:016x}", replay.hash), "becc1bb49455926f");
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn the_simulation_agrees_with_the_derived_trip_times() {
         }
         sim.step(&s.commands[start..next]).unwrap();
         let (cruise, _) = sim.ship_state(2).unwrap();
-        if cruise_arrived.is_none() && cruise.x >= 0.0 && sim.tick() > 2 {
+        if cruise_arrived.is_none() && cruise.z >= 0.0 && sim.tick() > 2 {
             cruise_arrived = Some(sim.tick());
         }
     }
@@ -101,9 +101,9 @@ fn the_simulation_agrees_with_the_derived_trip_times() {
     for id in [1, 2] {
         let (position, velocity) = sim.ship_state(id).unwrap();
         assert!(
-            (position.x - radius).abs() < 100.0,
+            (position.z - radius).abs() < 100.0,
             "ship {id} at {}",
-            position.x
+            position.z
         );
         assert!(
             velocity.length() < 0.1,
@@ -137,7 +137,7 @@ fn a_short_trip_is_triangular_and_still_arrives() {
         sim.step(&s.commands[start..next]).unwrap();
     }
     let (position, velocity) = sim.ship_state(1).unwrap();
-    assert!((position.x - 10_000.0).abs() < 5.0, "at {}", position.x);
+    assert!((position.z - 10_000.0).abs() < 5.0, "at {}", position.z);
     assert!(velocity.length() < 0.1);
 }
 

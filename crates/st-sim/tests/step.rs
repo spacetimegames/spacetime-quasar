@@ -19,8 +19,10 @@ fn setup() -> Setup {
             max_accel: 10.0,
             max_turn_rate: 1.0,
             drag: 0.0,
+            ..ShipInit::default()
         }],
         pilots: vec![(PilotId(1), Some(7)), (PilotId(2), None)],
+        ai_pilots: Vec::new(),
         gravity_mu: 0.0,
     }
 }
@@ -42,8 +44,16 @@ fn thrust_accelerates_along_the_heading() {
     let mut sim = Sim::new(&setup(), 0).unwrap();
     sim.step(&[cmd(0, 1, 1, 32767)]).unwrap();
     let (p, v) = sim.ship_state(7).unwrap();
-    assert_eq!(v, DVec3::new(10.0 * DT, 0.0, 0.0));
-    assert_eq!(p, DVec3::new(1000.0 + 10.0 * DT * DT, 0.0, 0.0));
+    // Heading 0 is +Z (ADR 0007). The body goes through Rapier, so compare with a
+    // tolerance rather than bit for bit.
+    assert!(
+        (v - DVec3::new(0.0, 0.0, 10.0 * DT)).length() < 1e-12,
+        "{v:?}"
+    );
+    assert!(
+        (p - DVec3::new(1000.0, 0.0, 10.0 * DT * DT)).length() < 1e-9,
+        "{p:?}"
+    );
 }
 
 #[test]
@@ -53,7 +63,7 @@ fn held_controls_persist_without_new_commands() {
     let (_, v1) = sim.ship_state(7).unwrap();
     sim.step(&[]).unwrap();
     let (_, v2) = sim.ship_state(7).unwrap();
-    assert!(v2.x > v1.x);
+    assert!(v2.z > v1.z);
 }
 
 #[test]
@@ -132,7 +142,7 @@ fn setup_errors() {
     s.pilots.push((PilotId(9), Some(99)));
     assert_eq!(Sim::new(&s, 0).unwrap_err(), SetupError::UnknownShip(99));
     let mut s = setup();
-    s.ships.push(s.ships[0]);
+    s.ships.push(s.ships[0].clone());
     assert_eq!(Sim::new(&s, 0).unwrap_err(), SetupError::DuplicateShip(7));
     let mut s = setup();
     s.ships[0].heading = f64::NAN;

@@ -17,8 +17,10 @@ use crate::command::{Command, CommandKind, ControlState, PilotId, StepError};
 use crate::hash::{DumpLine, HashError};
 use crate::sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
 
+mod fleets;
 mod kernels;
 
+pub use fleets::{combat_60s, physics_swarm};
 pub use kernels::{EDGE, MathKernels, math_kernels};
 
 /// Attractor strength shared by the scenarios, in m^3/s^2.
@@ -187,7 +189,13 @@ impl Scenario {
 
 /// Every scenario, in name order.
 pub fn all() -> Vec<Scenario> {
-    vec![orbit_coast(), solo_burn(), swarm_controls()]
+    vec![
+        combat_60s(),
+        orbit_coast(),
+        physics_swarm(),
+        solo_burn(),
+        swarm_controls(),
+    ]
 }
 
 /// Looks a scenario up by name.
@@ -196,6 +204,17 @@ pub fn by_name(name: &str) -> Option<Scenario> {
 }
 
 fn controls(tick: Tick, pilot: u64, seq: u64, thrust: i16, strafe: i16, turn: i16) -> Command {
+    controls_with(tick, pilot, seq, (thrust, strafe, turn), 0)
+}
+
+/// A `Controls` command with held buttons.
+fn controls_with(
+    tick: Tick,
+    pilot: u64,
+    seq: u64,
+    (thrust, strafe, turn): (i16, i16, i16),
+    buttons: u32,
+) -> Command {
     Command {
         tick,
         pilot: PilotId(pilot),
@@ -205,7 +224,7 @@ fn controls(tick: Tick, pilot: u64, seq: u64, thrust: i16, strafe: i16, turn: i1
             strafe,
             turn,
             aim: None,
-            buttons: 0,
+            buttons,
         }),
     }
 }
@@ -213,13 +232,10 @@ fn controls(tick: Tick, pilot: u64, seq: u64, thrust: i16, strafe: i16, turn: i1
 fn ship(id: u64, position: DVec3, velocity: DVec3, heading: f64) -> ShipInit {
     ShipInit {
         id,
-        system: 0,
         position,
         velocity,
         heading,
-        max_accel: 25.0,
-        max_turn_rate: 1.5,
-        drag: 0.01,
+        ..ShipInit::default()
     }
 }
 
@@ -239,6 +255,7 @@ pub fn solo_burn() -> Scenario {
         setup: Setup {
             ships: vec![ship(1, DVec3::new(10_000.0, 0.0, 0.0), DVec3::ZERO, 0.0)],
             pilots: vec![(PilotId(1), Some(1))],
+            ai_pilots: Vec::new(),
             gravity_mu: MU,
         },
         commands,
@@ -258,11 +275,13 @@ pub fn orbit_coast() -> Scenario {
         let phase = ring.f64_at(1) * (2.0 * core::f64::consts::PI);
         let (s, c) = det::sin_cos(phase);
         let speed = (MU / radius).sqrt();
+        // Circular orbit in the XZ plane, nose along the velocity.
+        let velocity = DVec3::new(-speed * s, 0.0, speed * c);
         ships.push(ship(
             id,
-            DVec3::new(radius * c, radius * s, 0.0),
-            DVec3::new(-speed * s, speed * c, 0.0),
-            phase + core::f64::consts::FRAC_PI_2,
+            DVec3::new(radius * c, 0.0, radius * s),
+            velocity,
+            det::atan2(velocity.x, velocity.z),
         ));
     }
     Scenario {
@@ -271,6 +290,7 @@ pub fn orbit_coast() -> Scenario {
         setup: Setup {
             ships,
             pilots: vec![(PilotId(1), Some(1))],
+            ai_pilots: Vec::new(),
             gravity_mu: MU,
         },
         commands: vec![
@@ -300,8 +320,8 @@ pub fn swarm_controls() -> Scenario {
         let speed = 20.0 * s.f64_at(3);
         ships.push(ship(
             id,
-            DVec3::new(radius * cos, radius * sin, 0.0),
-            DVec3::new(speed * hc, speed * hs, 0.0),
+            DVec3::new(radius * cos, 0.0, radius * sin),
+            DVec3::new(speed * hs, 0.0, speed * hc),
             heading,
         ));
         pilots.push((PilotId(id), Some(id)));
@@ -335,6 +355,7 @@ pub fn swarm_controls() -> Scenario {
         setup: Setup {
             ships,
             pilots,
+            ai_pilots: Vec::new(),
             gravity_mu: MU,
         },
         commands,

@@ -6,7 +6,8 @@
 //! hash as 16 lower-case hex digits. Lines are sorted and LF-terminated.
 //!
 //! The scenarios are of three kinds: the simulation scenarios of
-//! [`st_sim::scenarios`] (`solo-burn`, `orbit-coast`, `swarm-controls`), the
+//! [`st_sim::scenarios`] (`physics-swarm`, `combat-60s`, and the interim `solo-burn`,
+//! `orbit-coast` and `swarm-controls`), the
 //! `st-math` scenario `math-kernels` ([`st_sim::scenarios::math_kernels`])
 //! and `data-fixtures`, the `st-data` golden fixtures as one data set
 //! ([`fixtures`]).
@@ -311,11 +312,18 @@ mod tests {
     #[test]
     fn dump_skips_scenarios_that_are_too_short() {
         // `solo-burn` has 600 ticks, `orbit-coast` and `math-kernels` 1,200,
-        // `swarm-controls` 2,400 and `data-fixtures` only tick 0.
+        // `swarm-controls` 2,400, `physics-swarm` and `combat-60s` 7,200 and
+        // `data-fixtures` only tick 0.
         let text = dump(None, 1_500).unwrap();
+        let names: std::collections::BTreeSet<_> =
+            text.lines().filter_map(|l| l.split(' ').next()).collect();
+        assert_eq!(
+            names.into_iter().collect::<Vec<_>>(),
+            ["combat-60s", "physics-swarm", "swarm-controls"]
+        );
         assert!(
             text.lines()
-                .all(|l| l.starts_with("swarm-controls 00001500 "))
+                .all(|l| l.split(' ').nth(1) == Some("00001500"))
         );
     }
 
@@ -350,9 +358,11 @@ mod tests {
         assert_eq!(
             names,
             [
+                "combat-60s",
                 "data-fixtures",
                 "math-kernels",
                 "orbit-coast",
+                "physics-swarm",
                 "solo-burn",
                 "swarm-controls"
             ]

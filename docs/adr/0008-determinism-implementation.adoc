@@ -9,6 +9,26 @@ Accepted. Sets the harness details that
 xref:0003-ci-design.adoc[ADR 0003] leaves to "the Phase 1 harness ADR",
 including the reference-file path.
 
+Erratum 2026-10-11 (SPAC-128), found when Rapier entered the simulation. The physics
+configuration of "Physics configuration and how leaks are neutralised" also sets, in
+`st-sim` and with the same intent of keeping the planar constraint and the budget:
+
+* `RigidBodyBuilder::gyroscopic_forces_enabled(false)`. With the default (on), a hull whose
+  principal axes are not the world axes picks up gyroscopic torque about the locked axes
+  and tilts out of the plane; the ship origin then drifted off y = 0 by about 2 cm within
+  10 s (measured on `physics-swarm`). Free 6-DOF flight (post-MVP) turns it back on with
+  the lock flags.
+* `IntegrationParameters::normalized_max_linear_velocity = 20,000` m/s. Rapier clamps every
+  body to 400 m/s by default, which capped normal flight (up to 1,000 m/s) and cruise
+  (up to 10 km/s, ADR 0007); the new value is twice the cruise envelope.
+* Ships never sleep (`can_sleep(false)`): gravity acts on them every tick.
+* Gravity is applied by `st-sim` as impulses, so Rapier's own gravity vector is zero. Weapon
+  sweeps go through the broad phase, which `Sim::new` brings up to date with a zero-length
+  step.
+* The interim simulation (SPAC-122) used the XY plane. It now follows ADR 0007: the plane is
+  XZ, the nose is local +Z, and a heading is a yaw about +Y.
+
+
 == Date
 
 2026-10-11
