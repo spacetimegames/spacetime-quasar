@@ -157,39 +157,18 @@ pub fn design(data: &str) -> String {
     format!("(\n    kind: \"ship_design\",\n    version: 3,\n    data: {data},\n)")
 }
 
-// Fixtures per version, as in ADR 0010 `tests/data/<kind>/v<N>/<case>.ron`. v1 and v3 are real
-// files read with `include_str!` (the Nix source filter keeps `.ron`); the rest are still strings.
+// Fixtures per version, as in ADR 0010 `tests/data/<kind>/v<N>/<case>.ron`, read with
+// `include_str!` (the Nix source filter keeps `.ron`). The determinism harness reads the same
+// files (`tools/determinism`, scenario `data-fixtures`).
 
 /// `ship_design/v1/shuttle.ron`.
 pub const SHUTTLE_V1: &str = include_str!("../data/ship_design/v1/shuttle.ron");
 
 /// `ship_design/v2/shuttle.ron`.
-pub const SHUTTLE_V2: &str = r#"// Version 2: adds armor.
-(
-    kind: "ship_design",
-    version: 2,
-    data: (
-        name: "Shuttle",
-        mass: 12.5,
-        armor: 3.0,
-    ),
-)
-"#;
+pub const SHUTTLE_V2: &str = include_str!("../data/ship_design/v2/shuttle.ron");
 
 /// `ship_design/v3/shuttle.ron`.
 pub const SHUTTLE_V3: &str = include_str!("../data/ship_design/v3/shuttle.ron");
 
 /// `ship_design/v3/minimal.ron`.
-pub const MINIMAL_V3: &str = r#"// The same value that v1/shuttle.ron migrates to: armor 0.0, no sections, no tags.
-(
-    kind: "ship_design",
-    version: 3,
-    data: (
-        name: "Shuttle",
-        mass: 12.5,
-        armor: 0.0,
-        sections: [],
-        tags: [],
-    ),
-)
-"#;
+pub const MINIMAL_V3: &str = include_str!("../data/ship_design/v3/minimal.ron");
