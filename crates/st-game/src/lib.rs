@@ -3,7 +3,7 @@
 //! Planned scope: Game glue: input mapping, camera rigs, the session loop, save and load, menus and content wiring.
 //!
 //! Boundary: this crate only connects lower crates. Today it holds one piece
-//! of content wiring, [`HotData`], which feeds `st-platform`'s file watcher
+//! of content wiring, `HotData`, which feeds `st-platform`'s file watcher
 //! into `st-data`'s loader (cargo feature `hot-reload`, off by default and enabled by the app in dev builds only,
 //! native targets only). The rest is a stub.
 //!
