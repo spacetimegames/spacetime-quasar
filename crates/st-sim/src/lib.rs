@@ -16,8 +16,11 @@
 //! Boundary: no GPU, no input devices, no wall clock, no files. A sim crate
 //! under ADR 0008, so it carries no clippy opt-out.
 //!
-//! Non-goals (not yet built): replay files and the command wire encoding
-//! (ADR 0009), session commands, Rapier physics, weapons, AI, economy.
+//! Non-goals (not yet built). From ADR 0009: replay files (`st_sim::replay`),
+//! the command wire encoding and its tag table with the reserved tags,
+//! `SIM_VERSION`, session commands, the `StepError` variants `NotExternal` and
+//! `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits.
+//! Also: Rapier physics, weapons, AI, economy.
 //!
 //! # Example
 //!

@@ -145,6 +145,10 @@ pub enum StepError {
         /// How many were passed.
         count: usize,
     },
+    /// The floating-point environment is not round-to-nearest-even without
+    /// flush-to-zero (`st_math::det::fp_env_is_default()` is false), so the
+    /// step would not be reproducible. Nothing was changed (ADR 0008).
+    FloatEnvironment,
 }
 
 impl core::fmt::Display for StepError {
@@ -163,6 +167,9 @@ impl core::fmt::Display for StepError {
                 write!(f, "command {index}: kind not valid from this pilot")
             }
             StepError::InvalidPayload { index } => write!(f, "command {index}: invalid payload"),
+            StepError::FloatEnvironment => {
+                f.write_str("the floating-point environment is not the default")
+            }
             StepError::TooManyCommands { count } => {
                 write!(
                     f,

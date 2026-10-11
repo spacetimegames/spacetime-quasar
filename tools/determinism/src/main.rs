@@ -3,24 +3,34 @@
 //! Runs the scenarios and writes the report (see the library docs). Exit
 //! status: 0 success, 1 usage or I/O error, 2 a scenario failed.
 
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: determinism --out <path> [--scenario <name>] [--checkpoint-every <n>]";
 
 fn main() -> ExitCode {
-    let mut out = None;
+    let mut out: Option<OsString> = None;
     let mut scenario = None;
     let mut every = st_sim::CHECKPOINT_INTERVAL;
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        let value = args.next();
-        match (arg.as_str(), value) {
-            ("--out", Some(v)) => out = Some(v),
-            ("--scenario", Some(v)) => scenario = Some(v),
-            ("--checkpoint-every", Some(v)) => match v.parse::<u64>() {
-                Ok(n) if n > 0 => every = n,
-                _ => return usage(),
+    // `args_os`: a non-UTF-8 argument is a usage error, not a panic.
+    let mut args = std::env::args_os().skip(1);
+    while let Some(flag) = args.next() {
+        let Some(value) = args.next() else {
+            return usage();
+        };
+        match flag.to_str() {
+            // The output path may be any OS string.
+            Some("--out") => out = Some(value),
+            Some("--scenario") => match value.into_string() {
+                Ok(v) => scenario = Some(v),
+                Err(_) => return usage(),
             },
+            Some("--checkpoint-every") => {
+                match value.to_str().and_then(|v| v.parse::<u64>().ok()) {
+                    Some(n) if n > 0 => every = n,
+                    _ => return usage(),
+                }
+            }
             _ => return usage(),
         }
     }
@@ -31,7 +41,7 @@ fn main() -> ExitCode {
         Ok(text) => match std::fs::write(&out, text) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
-                eprintln!("determinism: cannot write `{out}`: {e}");
+                eprintln!("determinism: cannot write `{}`: {e}", out.to_string_lossy());
                 ExitCode::from(1)
             }
         },

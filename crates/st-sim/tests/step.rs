@@ -194,3 +194,17 @@ fn fixed_step_clock_gives_the_same_ticks_whatever_the_frame_rate() {
     assert_eq!(run(10, 200), (240, run(25, 80).1));
     assert_eq!(run(25, 80).0, 240);
 }
+
+#[test]
+fn the_default_float_environment_lets_a_step_run() {
+    // Nothing in safe code can change the environment, so the failing
+    // branch is covered by its message only.
+    assert!(st_math::det::fp_env_is_default());
+    let mut sim = Sim::new(&setup(), 0).unwrap();
+    assert_eq!(sim.step(&[]), Ok(()));
+    assert_eq!(sim.tick(), 1);
+    assert_eq!(
+        StepError::FloatEnvironment.to_string(),
+        "the floating-point environment is not the default"
+    );
+}

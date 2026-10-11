@@ -10,7 +10,9 @@ Status: minimal.
 The leak detector, tick dumps, the artifact upload and the `determinism` compare job of xref:adr/0003-ci-design.adoc[ADR 0003] are not built yet.
 Each platform job diffs its own output with the reference file instead, which gives the same pass or fail result.
 
-Commands below were run by an agent on the reference dev machine (Linux x86_64) inside `nix develop`, so they carry no tag.
+From ADR 0009, these are not built yet: replay files (`st_sim::replay`) and replay scenarios, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, session commands, the `StepError` variants `NotExternal` and `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits. The three scenarios are interim and use different names from the scenarios in ADR 0008.
+
+Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38128682426 passed them on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
 
 == What it checks
 
@@ -48,7 +50,7 @@ It is generated on Linux, kept LF-only by `.gitattributes`, and read by a test w
 Everything below runs inside `nix develop`, which provides the pinned toolchain and wasmtime.
 Use your build slot as `CARGO_TARGET_DIR` as described in xref:adr/0004-build-resources.adoc[ADR 0004].
 
-Run the harness and compare:
+Run the harness and compare `[ci-tested]`:
 
 [source,sh]
 ----
@@ -69,6 +71,7 @@ cargo test -p determinism -p st-sim -p st-rng -p st-data -p st-math -p st-time
 == Run it on wasm32-wasip1
 
 The dev shell sets `CARGO_TARGET_WASM32_WASIP1_RUNNER` to `wasmtime run --dir=.`.
+The three commands below are `[ci-tested]`.
 Outside the dev shell, set it yourself and install the target (`rust-toolchain.toml` already lists it).
 
 [source,sh]

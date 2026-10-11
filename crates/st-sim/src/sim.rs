@@ -232,11 +232,18 @@ impl Sim {
     /// [`command::sort`](crate::command::sort). Within the tick, commands
     /// apply first, then the bodies move.
     ///
+    /// Before anything else it checks `st_math::det::fp_env_is_default()` (ADR 0008).
+    ///
     /// # Errors
     ///
-    /// A [`StepError`] naming the first offending command. The whole slice is
-    /// validated before anything changes, so on error the state is unchanged.
+    /// [`StepError::FloatEnvironment`] if the floating-point environment was
+    /// changed. Otherwise a [`StepError`] naming the first offending command. The
+    /// whole slice is validated before anything changes, so on error the state is
+    /// unchanged.
     pub fn step(&mut self, commands: &[Command]) -> Result<(), StepError> {
+        if !det::fp_env_is_default() {
+            return Err(StepError::FloatEnvironment);
+        }
         self.validate(commands)?;
         for cmd in commands {
             // Validated above: the pilot exists.
