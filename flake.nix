@@ -245,6 +245,8 @@
                 pkgs.cargo-deny
                 # Runs the wasm32-wasip1 tests and the determinism harness (ADR 0008).
                 pkgs.wasmtime
+                # Renders and checks the AsciiDoc docs (docs rules in AGENTS.md).
+                pkgs.asciidoctor
               ]
               ++ lib.optionals stdenv.hostPlatform.isLinux [ pkgs.mold ];
 
