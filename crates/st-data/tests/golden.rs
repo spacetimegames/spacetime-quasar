@@ -6,16 +6,14 @@
 
 mod common;
 
-use common::{Catalog, Section, ShipDesign, design, load_design, v1, v2};
+use common::{
+    Catalog, MINIMAL_V3, SHUTTLE_V1, SHUTTLE_V2, SHUTTLE_V3, Section, ShipDesign, design,
+    load_design, v1, v2,
+};
 use serde::Serialize;
 use st_data::{
     Code, ContentHash, DataSetEntry, Loader, canonical_bytes, content_hash, data_set_hash,
 };
-
-const SHUTTLE_V3: &str = include_str!("data/ship_design/v3/shuttle.ron");
-const MINIMAL_V3: &str = include_str!("data/ship_design/v3/minimal.ron");
-const SHUTTLE_V2: &str = include_str!("data/ship_design/v2/shuttle.ron");
-const SHUTTLE_V1: &str = include_str!("data/ship_design/v1/shuttle.ron");
 
 const GOLDEN_SHUTTLE_V3: &str =
     "b3:a9513a06f037cb8e9cb2bdba9a75a003aa6c305c7a09e82cea4af2295e507fc2";

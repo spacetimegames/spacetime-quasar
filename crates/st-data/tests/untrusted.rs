@@ -3,10 +3,8 @@
 
 mod common;
 
-use common::{ShipDesign, design};
+use common::{SHUTTLE_V3 as FIXTURE, ShipDesign, design};
 use st_data::{Code, Loader};
-
-const FIXTURE: &str = include_str!("data/ship_design/v3/shuttle.ron");
 
 fn load(bytes: &[u8]) -> Result<(), Vec<st_data::Diagnostic>> {
     Loader::new()
