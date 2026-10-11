@@ -9,6 +9,9 @@ Accepted. Amends the MSRV in xref:0001-toolchain-msrv-nix.adoc[ADR 0001] and
 the `msrv` job in xref:0003-ci-design.adoc[ADR 0003]: 1.89 from the PR that
 adds `rapier3d-f64`.
 
+Amended on 2026-10-11 by <<amendment-orbital-frame>>, which adds the
+orbital reference frame.
+
 == Date
 
 2026-10-11
@@ -366,6 +369,116 @@ A different answer may need this ADR revisited.
 
 Update 2026-10-11: PD-31 (speed envelope, provisional), PD-32 (no system edge, replacing the soft-boundary assumption) and PD-33 (replays) answer the items above.
 
+[[amendment-orbital-frame]]
+== Amendment 2026-10-11: orbital reference frame
+
+This section was added on 2026-10-11 (SPAC-123), with the Kepler orbits in
+`st_math::orbit`. The decision above fixed the world axes but not the frame
+for orbital elements. The reference direction in particular is a data
+contract: orbital elements in `+assets/**/*.ron+` mean something only
+relative to it.
+
+=== Orbital frame
+
+* *Mapping.* The orbit code uses the textbook inertial frame internally:
+  reference plane XY, normal +Z, perifocal axes P (towards periapsis) and Q
+  (90° ahead in the direction of motion). A textbook vector `(x, y, z)` is
+  the world vector `(x, z, −y)`; a world vector `(x, y, z)` is the textbook
+  vector `(x, −z, y)`. The map is a rotation (determinant +1), so handedness
+  is preserved. It only permutes components and negates one, so it is exact
+  in floating point. All public vectors are world vectors.
+* *Reference plane.* The orbital reference plane is the system's XZ plane
+  (the gameplay plane), and its normal is world +Y.
+* *Reference direction.* The longitude of the ascending node is measured
+  from world +X, as a rotation about +Y (from +X towards −Z). World +X plays
+  the part of the vernal equinox. The ascending node is where the body
+  crosses the XZ plane moving towards +Y.
+* *Inclination.* Inclination is the angle between the orbit's angular
+  momentum and +Y, in [0, π]. Inclination 0 is an orbit in the XZ plane with
+  angular momentum along +Y. Inclination π is the same plane travelled the
+  other way, with angular momentum along −Y.
+* *Prograde.* A prograde orbit (inclination below π/2) turns
+  counter-clockwise seen from +Y looking down: a body leaving +X moves
+  towards −Z. With every angle 0, periapsis lies on +X and the velocity there
+  points along −Z.
+* *Argument of periapsis* is measured from the ascending node along the
+  orbit, in the direction of motion.
+* *Units.* SI, as in the decision above: semi-major axis in metres,
+  gravitational parameter `mu` in m^3^/s^2^, time in seconds, velocity in
+  m/s, angles in radians. `st_math::orbit` accepts any finite angle and wraps
+  where needed. Angles it derives from state vectors are in [0, 2π], the
+  inclination in [0, π]. Eccentricity is limited to [0, 0.999]: elliptic
+  orbits only.
+* *Time base.* `st_math::orbit` has no absolute epoch. Elements carry the
+  mean anomaly at a reference time, and propagation takes an elapsed time
+  `dt` in seconds from that reference (negative allowed). A long-lived body
+  keeps its original elements and is placed with the total elapsed time, so
+  rounding does not accumulate. Which simulation instant is the reference
+  time for elements in data files is not decided here. It belongs to the
+  first change that loads orbits from data.
+* *Degenerate orbits.* When elements are derived from a state vector, an
+  equatorial orbit (sin _i_ below 10^-11^) gets longitude of the ascending
+  node 0 and inclination exactly 0 or π. A circular orbit (eccentricity below
+  10^-11^) gets argument of periapsis 0, with the anomaly measured from the
+  ascending node (from +X when also equatorial).
+* *Relative states.* State vectors are relative to the orbited body, along
+  the system frame axes. The caller adds a moon's state to its parent's.
+
+The test `frame_convention_matches_adr_0007` in
+`crates/st-math/tests/orbit.rs` checks the reference direction, the
+prograde sense, the sign of the angular momentum, the ascending node and the
+retrograde case.
+
+=== Reasoning
+
+* The gameplay plane is XZ (PD-01 and the decision above), and most bodies
+  orbit in or near it. With XZ as the reference plane, in-plane orbits have
+  inclination 0 and stay at y = 0, with no frame conversion in data.
+* +X is the first axis of the system frame, and the textbook reference
+  direction maps to it unchanged (`x` stays `x`), so no rotation about the
+  normal is needed.
+* Counter-clockwise seen from +Y is a positive rotation about +Y in a
+  right-handed frame. Prograde orbits therefore have angular momentum along
+  +Y, matching the textbook rule that prograde angular momentum points along
+  the reference normal.
+* The textbook equations stay unmodified inside the module, and only the two
+  boundary maps know about world axes. Reviewers can check the formulas
+  against any reference text.
+
+=== Alternatives considered
+
+Z-up orbital frame, converted at the simulation boundary::
+  Elements and state vectors would live in a Z-up frame, and `st-sim` would
+  convert to world axes. That puts a second frame in public APIs and data
+  files, and every caller must track which frame a vector is in. The chosen
+  design keeps the Z-up frame private to `st_math::orbit`.
+Reference direction +Z (the ship forward axis)::
+  Equally valid, but it needs a rotation about +Y on top of the axis
+  permutation, and no gameplay need favours it. +X keeps the map a
+  permutation with one sign change.
+Prograde as clockwise seen from +Y::
+  Either the map becomes a reflection (determinant −1) or the textbook
+  formulas need a sign flip, and prograde angular momentum would point
+  along −Y.
+Degrees in the API::
+  The workspace uses SI throughout (the decision above). A data schema may
+  still offer authors another unit and convert at load; the frame does not
+  change.
+
+=== Consequences
+
+* Orbital elements in data files are relative to this frame: reference
+  plane XZ, reference direction +X, ascending towards +Y, prograde
+  counter-clockwise seen from +Y. Changing any of these later changes the
+  meaning of every stored orbit, and needs a data migration (ADR 0010) and
+  a new amendment or a superseding ADR.
+* Authors and generators can read positions directly: an equatorial orbit
+  with every angle 0 has periapsis on +X.
+* The reference time of elements in data files stays open until the first
+  orbit is loaded from data.
+* The determinism rules of ADR 0008 apply to the orbit code unchanged; the
+  frame map adds no rounding.
+
 == References
 
 * PD-01, PD-04, PD-06, PD-10, PD-11 and PD-26 in `docs/decisions/`
@@ -377,4 +490,4 @@ Update 2026-10-11: PD-31 (speed envelope, provisional), PD-32 (no system edge, r
 * xref:0001-toolchain-msrv-nix.adoc[ADR 0001], xref:0002-dependency-policy.adoc[ADR 0002],
   xref:0003-ci-design.adoc[ADR 0003], xref:0006-math-library-boundary.adoc[ADR 0006],
   xref:0008-determinism-implementation.adoc[ADR 0008], xref:0010-data-schema-versioning.adoc[ADR 0010]
-* Jira: SPAC-104
+* Jira: SPAC-104; SPAC-123 (orbital reference frame amendment)

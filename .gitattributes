@@ -1,0 +1,2 @@
+# The determinism reference must stay byte-identical on every platform (ADR 0003).
+tools/determinism/reference.txt text eol=lf

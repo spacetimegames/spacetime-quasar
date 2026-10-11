@@ -6,5 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[dependencies]
+st-math = { path = "../st-math" }
+st-rng = { path = "../st-rng" }
+st-time = { path = "../st-time" }
+
 [lints]
 workspace = true
