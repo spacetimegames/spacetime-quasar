@@ -13,6 +13,8 @@
 //! * [`RenderOrigin`]: the camera-relative render origin of the large-world scheme. The
 //!   simulation works in `f64` metres in a system frame; the renderer works in `f32`
 //!   metres relative to a grid-aligned origin near the camera.
+//! * [`eigen`]: eigen-decomposition of symmetric 3 x 3 matrices (Jacobi, fixed schedule), used for
+//!   the principal axes of ship inertia tensors (ADR 0008).
 //! * [`orbit`]: deterministic Kepler orbits. Elements and state vectors convert both ways, and
 //!   an orbit is advanced in time with a Kepler-equation solver that runs a fixed number of
 //!   iterations. Elliptic orbits only; bad input is an error value, never a panic.
@@ -47,6 +49,7 @@
 pub use glam;
 
 pub mod det;
+pub mod eigen;
 pub mod interp;
 pub mod orbit;
 mod render_origin;
