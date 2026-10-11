@@ -34,7 +34,7 @@ pub const REMINDER_EVERY: Nanos = Nanos::from_secs(10);
 pub struct Session {
     root: String,
     hot: HotData<SpaceEnvelope>,
-    /// The latest reload error, kept until a valid edit arrives.
+    /// What still stands as a problem, as of the last report.
     last_error: Option<ReloadError>,
     last_reminder: Nanos,
 }
@@ -59,21 +59,17 @@ impl Session {
     }
 
     /// Does one slice of watcher work; call once per frame. Returns text to
-    /// print when something happened: a good edit, a bad edit, or the reminder
-    /// that a bad edit still stands.
+    /// print when something happened: a good edit, a bad edit, a file that is
+    /// valid again (even with the same values as before), or the reminder that
+    /// a bad edit still stands.
     pub fn poll(&mut self, now: Nanos) -> Option<String> {
         if let Some(report) = self.hot.poll(now) {
             self.last_reminder = now;
             let mut head = String::new();
-            if let Some(error) = report.error {
-                let _ = writeln!(
-                    head,
-                    "\n--- EDIT REJECTED: the old values stay in use (data generation {}) ---",
-                    self.hot.generation()
-                );
-                self.last_error = Some(error);
-            } else if let Some(reloaded) = &report.reloaded {
-                self.last_error = None;
+            // What stands is the library's to say: a problem ends when its
+            // own file loads again, not when some other edit is accepted.
+            self.last_error = self.hot.standing_error();
+            if let Some(reloaded) = &report.reloaded {
                 let names: Vec<&str> = reloaded.events.iter().map(|e| e.source.as_str()).collect();
                 let _ = writeln!(
                     head,
@@ -81,6 +77,31 @@ impl Session {
                     reloaded.generation,
                     names.join(", ")
                 );
+            } else if report.error.is_some() {
+                let _ = writeln!(
+                    head,
+                    "\n--- EDIT REJECTED: the old values stay in use (data generation {}) ---",
+                    self.hot.generation()
+                );
+            }
+            if !report.recovered.is_empty() {
+                let files = report.recovered.join(", ");
+                if report.reloaded.is_none() {
+                    let _ = writeln!(
+                        head,
+                        "\n--- RECOVERED (data generation {}): {files} is valid again ---",
+                        self.hot.generation()
+                    );
+                    let _ = writeln!(
+                        head,
+                        "The values are the same as the ones already in use, so nothing else changed."
+                    );
+                } else {
+                    let _ = writeln!(head, "RECOVERED: {files} is valid again.");
+                }
+                if self.last_error.is_none() {
+                    let _ = writeln!(head, "The error is cleared.");
+                }
             }
             return Some(format!("{head}{}", self.body()));
         }
@@ -150,6 +171,10 @@ impl Session {
                         env.replay_seed
                     );
                     let _ = writeln!(out, "    final state hash: {:016x}", r.hash);
+                    let _ = writeln!(
+                        out,
+                        "      (the simulation's result: it moves only when a number the simulation uses changes, never for the real-world yardsticks)"
+                    );
                 }
                 Err(e) => {
                     let _ = writeln!(out, "    no replay: {e}");
@@ -165,6 +190,10 @@ impl Session {
         }
         if let Ok(hash) = data_set_hash(&entries) {
             let _ = writeln!(out, "  data hash: {hash}");
+            let _ = writeln!(
+                out,
+                "    (a fingerprint of everything the file says, yardsticks included: any value change moves it, so it is not the simulation's result)"
+            );
         }
         if self.last_error.is_some() {
             out.push_str(
