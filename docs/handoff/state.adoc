@@ -77,7 +77,7 @@ Needed before Phase N means the answer must exist before that phase starts.
 * Licence: deferred by the owner. All rights reserved meanwhile. To be decided at the first crate publication review or the MVP release, whichever comes first (open point #7).
 * Open point #15, the native X11 test session, is parked until Phase 6.
 
-G2, G5 (basic), G7 and G9 (basic) are answered (PD-27 to PD-30). G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
+G2, G5 (basic), G7 and G9 (basic) are answered (PD-27 to PD-30). The speed envelope (provisional), system edge, replay and save-compatibility questions are answered (PD-31 to PD-34). G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
 
 == Where to start
 

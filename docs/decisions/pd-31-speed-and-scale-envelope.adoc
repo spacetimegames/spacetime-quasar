@@ -5,7 +5,7 @@
 * *Resolves:* the speed-envelope question listed in xref:../adr/0007-large-world-coordinates.adoc[ADR 0007]
 * *Status:* provisional, to be tuned by playtesting
 
-*Context.* ADR 0007 assumes normal flight at most 1,000 m/s, cruise at most 10 times that, systems about 2,000 km across and bodies 1 to 2 minutes apart at normal speed. The owner could not picture these numbers in the abstract.
+*Context.* ADR 0007 assumes normal flight at most 1,000 m/s, cruise at most 10 times that, systems about 2,000 km in radius and bodies 1 to 2 minutes apart at normal speed. The owner could not picture these numbers in the abstract.
 
 *Decision.*
 
@@ -22,5 +22,3 @@
 
 * No code constant depends on these values. Anything derived from them (validity bound, precision margins) is checked against the data when it changes.
 * ADR 0007 keeps its engineering assumptions until the owner confirms the values.
-
-*Reference games.* _EV: Nova_, _Elite Dangerous_.

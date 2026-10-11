@@ -352,7 +352,6 @@ Logarithmic depth::
 === Open product questions
 
 Each item is an assumption this ADR builds on, pending owner confirmation.
-Update 2026-10-11: PD-31 (speed envelope, provisional), PD-32 (no system edge, replacing the soft-boundary assumption) and PD-33 (replays) answer items below.
 A different answer may need this ADR revisited.
 
 . *Speed envelope.* Assumed: normal flight at most 1,000 m/s, cruise at
@@ -364,6 +363,8 @@ A different answer may need this ADR revisited.
 . *Replays across game versions.* Assumed: replays are version-locked and
   play back only in the simulation version that recorded them (ADR 0008),
   while saves are upgrade-safe per ADR 0010.
+
+Update 2026-10-11: PD-31 (speed envelope, provisional), PD-32 (no system edge, replacing the soft-boundary assumption) and PD-33 (replays) answer the items above.
 
 == References
 
