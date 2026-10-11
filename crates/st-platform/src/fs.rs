@@ -20,6 +20,10 @@ pub const DEFAULT_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// uses `/` as the separator on every platform; a diagnostic or a hash that
 /// includes it then does not depend on the host operating system.
 ///
+/// Path components that are not valid UTF-8 are converted lossily (invalid
+/// bytes become U+FFFD), so two such distinct paths could get the same name;
+/// asset names should be UTF-8.
+///
 /// ```
 /// use st_platform::FileSource;
 ///
@@ -157,7 +161,7 @@ impl Error for FsError {
     }
 }
 
-/// Turns a path into a source name: lossy UTF-8 with `/` separators.
+/// Turns a path into a source name: lossy UTF-8 with `/` separators. Distinct non-UTF-8 paths may collide.
 pub(crate) fn source_name_of(path: &Path) -> String {
     let text = path.to_string_lossy();
     if std::path::MAIN_SEPARATOR == '/' {
@@ -241,10 +245,13 @@ pub fn read_file_limited(
 
 /// Lists the files under `root`, in a fixed order.
 ///
-/// Searches subdirectories. Returns paths (each starting with `root`) in
-/// byte-wise sorted order, so that loading them gives the same sequence on
-/// every machine; directory order from the operating system is unspecified
-/// and ADR 0008 forbids letting that leak into the simulation. With
+/// Searches subdirectories. Returns paths (each starting with `root`) sorted
+/// by `Path` comparison, which compares component by component, so the files
+/// of one directory stay together. The order depends only on the paths, not on
+/// the order the operating system lists a directory in, which is unspecified
+/// and which ADR 0008 forbids letting leak into the simulation. (Names that
+/// are not plain ASCII may compare differently on different operating
+/// systems.) With
 /// `extension` set (without the dot, for example `"ron"`), only files with
 /// that extension are returned.
 ///
@@ -324,6 +331,7 @@ mod imp {
                 }
             }
         }
+        // `PathBuf` ordering is component-wise and independent of directory order.
         found.sort();
         Ok(found)
     }

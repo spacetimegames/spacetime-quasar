@@ -13,6 +13,9 @@
 //!   walks a whole tree. The sweep resumes where the previous call stopped.
 //! * *What counts as a change.* A different modification time or a different
 //!   length. Files that appear or disappear are noticed by the listing itself.
+//!   An edit that keeps the length and lands within the file system's timestamp
+//!   granularity of the previous write (some file systems store whole seconds)
+//!   is not noticed; this is inherent to polling metadata.
 //! * *Batches.* Changes are held back until none has been seen for
 //!   [`WatcherConfig::quiet_period`] (200 ms by default). An editor that writes
 //!   a temporary file and renames it, or a "save all", therefore produces one
@@ -121,6 +124,10 @@ pub struct Change {
     path: PathBuf,
     name: String,
     kind: ChangeKind,
+    // What `reported` held for the path before and after this change was
+    // released, so that `Watcher::requeue` can undo exactly this change.
+    prev: Option<Entry>,
+    released: Option<Entry>,
 }
 
 impl Change {
@@ -210,7 +217,7 @@ struct Stamp {
     len: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Entry {
     stamp: Stamp,
     /// Index into `Watcher::roots`.
@@ -264,6 +271,13 @@ struct Sweep {
 ///
 /// The first complete sweep of a root only records what is there: files that
 /// exist when watching starts are not reported as added.
+///
+/// The baseline is each file's state when the first sweep visits it, which
+/// takes a few polls for a big tree. An edit made before the sweep reaches the
+/// file is part of the baseline and is never reported. A caller that loads
+/// its initial data should therefore poll until [`Watcher::sweeps_completed`]
+/// is at least 1 and load afterwards: an edit that lands between baseline and
+/// load is then loaded twice (harmless) rather than missed.
 #[derive(Debug)]
 pub struct Watcher {
     config: WatcherConfig,
@@ -276,6 +290,9 @@ pub struct Watcher {
     reported: BTreeMap<PathBuf, Entry>,
     /// Paths whose `current` may differ from `reported`.
     dirty: BTreeSet<PathBuf>,
+    /// Paths of rejected batches, joined to the next batch. They do not start
+    /// a batch themselves: re-releasing unchanged files would be rejected again.
+    requeued: BTreeSet<PathBuf>,
     last_change: Nanos,
     sweep: Option<Sweep>,
     sweeps_completed: u64,
@@ -291,6 +308,7 @@ impl Watcher {
             current: BTreeMap::new(),
             reported: BTreeMap::new(),
             dirty: BTreeSet::new(),
+            requeued: BTreeSet::new(),
             last_change: Nanos::ZERO,
             sweep: None,
             sweeps_completed: 0,
@@ -485,7 +503,9 @@ impl Watcher {
         }
         let mut changes = Vec::new();
         // `BTreeSet` iterates in path order, which fixes the batch order.
-        for path in std::mem::take(&mut self.dirty) {
+        let mut paths = std::mem::take(&mut self.dirty);
+        paths.append(&mut self.requeued);
+        for path in paths {
             let current = self.current.get(&path).copied();
             let reported = self.reported.get(&path).copied();
             let (kind, root) = match (reported, current) {
@@ -503,9 +523,63 @@ impl Watcher {
                 .get(root)
                 .and_then(|r| path.strip_prefix(r).ok())
                 .map_or_else(|| source_name_of(&path), source_name_of);
-            changes.push(Change { path, name, kind });
+            changes.push(Change {
+                path,
+                name,
+                kind,
+                prev: reported,
+                released: current,
+            });
         }
         (!changes.is_empty()).then_some(ChangeBatch { changes })
+    }
+
+    /// Hands a rejected batch back, so that its changes are not lost.
+    ///
+    /// A released batch counts as delivered: its files are not reported again
+    /// unless they change. The consumer contract is therefore: if the batch
+    /// is rejected (a file does not read, or the data set refuses it because
+    /// validation fails), call `requeue` with that batch. Its changes are then
+    /// joined to the next batch, which is released after the next file change
+    /// once the quiet period has passed, so a fix to one file brings the rest
+    /// of the rejected batch with it. Requeued changes do not release a batch
+    /// on their own; that would hand the same rejected files back every
+    /// frame.
+    ///
+    /// Changes that a later batch has already superseded are dropped, and a
+    /// requeued file that changed again is reported once, in its newest state.
+    ///
+    /// ```
+    /// use st_platform::{Watcher, WatcherConfig};
+    /// use st_time::Nanos;
+    ///
+    /// # let dir = std::env::temp_dir().join(format!("st-platform-doc-requeue-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&dir).unwrap();
+    /// let mut watcher = Watcher::new(WatcherConfig::new());
+    /// watcher.watch_root(&dir);
+    /// # while watcher.sweeps_completed() == 0 { watcher.poll(Nanos::ZERO); }
+    /// # std::fs::write(dir.join("a.ron"), "x").unwrap();
+    /// # while watcher.sweeps_completed() < 2 { watcher.poll(Nanos::ZERO); }
+    /// if let Some(batch) = watcher.poll(Nanos::from_secs(1)) {
+    ///     let accepted = false; // for example: the data set rejected the batch
+    ///     if !accepted {
+    ///         watcher.requeue(&batch);
+    ///     }
+    /// }
+    /// # std::fs::remove_dir_all(&dir).unwrap();
+    /// ```
+    pub fn requeue(&mut self, batch: &ChangeBatch) {
+        for change in &batch.changes {
+            // A later batch already reported a newer state: nothing to undo.
+            if self.reported.get(&change.path).copied() != change.released {
+                continue;
+            }
+            match change.prev {
+                Some(prev) => self.reported.insert(change.path.clone(), prev),
+                None => self.reported.remove(&change.path),
+            };
+            self.requeued.insert(change.path.clone());
+        }
     }
 }
 
@@ -745,6 +819,69 @@ mod tests {
         finish_sweep(&mut w, Nanos::ZERO);
         let batch = w.poll(QUIET).expect("batch");
         assert_eq!(names(&batch), [("f9.ron".to_owned(), ChangeKind::Modified)]);
+    }
+
+    #[test]
+    fn requeued_batch_joins_the_next_batch_with_the_fix() {
+        let dir = TempDir::new();
+        write(&dir.path().join("a.ron"), "1");
+        write(&dir.path().join("b.ron"), "1");
+        write(&dir.path().join("gone.ron"), "1");
+        let mut w = primed(&dir);
+
+        write(&dir.path().join("a.ron"), "22");
+        write(&dir.path().join("b.ron"), "22");
+        write(&dir.path().join("new.ron"), "1");
+        fs::remove_file(dir.path().join("gone.ron")).unwrap();
+        finish_sweep(&mut w, Nanos::ZERO);
+        let rejected = w.poll(QUIET).expect("batch");
+        assert_eq!(rejected.len(), 4);
+
+        // The consumer rejected it. Without requeue nothing would come back.
+        w.requeue(&rejected);
+        finish_sweep(&mut w, Nanos::from_secs(10));
+        assert!(
+            w.poll(Nanos::from_secs(20)).is_none(),
+            "no release without a new change"
+        );
+
+        // The user fixes a.ron; the whole rejected set arrives with the fix.
+        write(&dir.path().join("a.ron"), "333");
+        finish_sweep(&mut w, Nanos::from_secs(30));
+        let batch = w.poll(Nanos::from_secs(31)).expect("batch");
+        assert_eq!(
+            names(&batch),
+            [
+                ("a.ron".to_owned(), ChangeKind::Modified),
+                ("b.ron".to_owned(), ChangeKind::Modified),
+                ("gone.ron".to_owned(), ChangeKind::Removed),
+                ("new.ron".to_owned(), ChangeKind::Added),
+            ]
+        );
+        // And once accepted, it is not repeated.
+        finish_sweep(&mut w, Nanos::from_secs(40));
+        assert!(w.poll(Nanos::from_secs(50)).is_none());
+    }
+
+    #[test]
+    fn requeue_of_a_superseded_batch_changes_nothing() {
+        let dir = TempDir::new();
+        write(&dir.path().join("a.ron"), "1");
+        let mut w = primed(&dir);
+
+        write(&dir.path().join("a.ron"), "22");
+        finish_sweep(&mut w, Nanos::ZERO);
+        let old = w.poll(QUIET).expect("batch");
+        write(&dir.path().join("a.ron"), "333");
+        finish_sweep(&mut w, Nanos::from_secs(1));
+        let newer = w.poll(Nanos::from_secs(2)).expect("batch");
+        assert_eq!(newer.len(), 1);
+
+        w.requeue(&old); // stale: a newer batch already delivered a.ron
+        write(&dir.path().join("b.ron"), "x");
+        finish_sweep(&mut w, Nanos::from_secs(3));
+        let batch = w.poll(Nanos::from_secs(4)).expect("batch");
+        assert_eq!(names(&batch), [("b.ron".to_owned(), ChangeKind::Added)]);
     }
 
     #[test]
