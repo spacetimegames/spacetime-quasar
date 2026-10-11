@@ -93,8 +93,8 @@
 //! not depend on pointer width or endianness. The golden vectors run in CI on
 //! Linux, macOS and Windows; execution on `wasm32` will come with the
 //! determinism harness (wasmtime on `wasm32-wasip1`, ADR 0008), and until then
-//! the `wasm32` job only builds the crate. The crate is `#![no_std]`, contains no `unsafe`, no allocation,
-//! and no panics on any input.
+//! the `wasm32` job only builds the crate. The crate is `#![no_std]`, contains
+//! no `unsafe`, no allocation, and no panics on any input.
 
 #![no_std]
 
