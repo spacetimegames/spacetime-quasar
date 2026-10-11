@@ -333,12 +333,44 @@ PR that changes the dependency. The decisions above are not edited in place.
   does not map until a buffer is presented (ADR 0005). Licence tree verified
   together with winit. Backend features are chosen by the Phase 2 ADR on the
   Windows default backend.
+
+| `serde`
+| `1.0.229`
+| Phase 1 (ADR 0010)
+| `st-data`, and the crates that own schema types. `default-features = false`,
+  features `std` and `derive`.
+
+| `ron`
+| `0.12.2`
+| Phase 1 (ADR 0010)
+| `st-data`; the charter's data format. `default-features = false`, feature
+  `std` (no `indexmap`, no `integer128`). Its error and position format is
+  relied on by the `st-data` span locator: re-check it on every upgrade.
+
+| `serde_path_to_error`
+| `0.1.20`
+| Phase 1 (ADR 0010)
+| `st-data`; the path of the failing value for every parse error. No release
+  in the last 12 months, admitted as demonstrably finished.
+
+| `serde_ignored`
+| `0.1.14`
+| Phase 1 (ADR 0010)
+| `st-data`; backstop that turns silently ignored fields into
+  `schema-not-strict`. No release in the last 12 months, admitted as
+  demonstrably finished.
+
+| `blake3`
+| `1.8.7`
+| Phase 1 (ADR 0010)
+| `st-data`; content hash. `default-features = false`, feature `pure` (no C
+  or assembly in the build). Admitted through its `Apache-2.0` licence
+  alternative.
 |===
 
 Named by the charter but not yet admitted (sign-off at introduction):
 `bytemuck` (trivial); `image` (sign-off, decoders limited to the formats
-used); `serde` with `ron` (sign-off; the save and config format gets its own
-ADR); `rapier3d` and `parry3d` (ADR required, because of PD-06 determinism
+used); `rapier3d` and `parry3d` (ADR required, because of PD-06 determinism
 features and float behaviour).
 
 == Alternatives considered

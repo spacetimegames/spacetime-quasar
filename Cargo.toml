@@ -20,6 +20,12 @@ members = [
 [workspace.dependencies]
 winit = "0.30"
 wgpu = "30.0.1"
+# ADR 0010: data schema versioning. Features are the minimum the ADR admits.
+serde = { version = "1.0.229", default-features = false, features = ["std", "derive"] }
+ron = { version = "0.12.2", default-features = false, features = ["std"] }
+serde_path_to_error = "0.1.20"
+serde_ignored = "0.1.14"
+blake3 = { version = "1.8.7", default-features = false, features = ["pure"] }
 
 [workspace.package]
 edition = "2024"
