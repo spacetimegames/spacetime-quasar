@@ -1,7 +1,7 @@
 //! `phase1-demo [--data <dir>] [--exit-after-ms <n>]`
 //!
 //! Watches `assets/space_envelope` (or `--data <dir>`), prints the validated
-//! values, figures a person can picture and a deterministic replay hash, and
+//! values, figures a person can picture and a deterministic final state hash, and
 //! prints them again when a file is saved. Stop it with Ctrl-C: it holds
 //! nothing that needs cleaning up and changes no terminal mode.
 //! `--exit-after-ms` exits with status 0 after that long, for smoke tests.

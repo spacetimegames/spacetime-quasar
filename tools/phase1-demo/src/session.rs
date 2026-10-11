@@ -142,13 +142,14 @@ impl Session {
                 Ok(r) => {
                     let _ = writeln!(
                         out,
-                        "    normal ship {}, cruise ship {}, {} ticks at 120 Hz from seed {}",
+                        "    normal ship {}, cruise ship {}, {} ticks at {} Hz from seed {}",
                         figures::duration(r.normal_crossing_s),
                         figures::duration(r.cruise_crossing_s),
                         figures::number(r.ticks as f64),
+                        st_time::TICK_RATE_HZ,
                         env.replay_seed
                     );
-                    let _ = writeln!(out, "    replay hash: {:016x}", r.hash);
+                    let _ = writeln!(out, "    final state hash: {:016x}", r.hash);
                 }
                 Err(e) => {
                     let _ = writeln!(out, "    no replay: {e}");

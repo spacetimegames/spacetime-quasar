@@ -53,10 +53,10 @@ fn a_valid_edit_prints_the_new_values_and_a_new_hash() {
     dir.write("a.ron", &text("1000.0"));
     let mut session = Session::open(&dir.0).unwrap();
     let first = session.report("started");
-    assert!(first.contains("replay hash:"));
+    assert!(first.contains("final state hash:"));
     let hash_of = |t: &str| {
         t.lines()
-            .find(|l| l.contains("replay hash:"))
+            .find(|l| l.contains("final state hash:"))
             .unwrap()
             .to_owned()
     };

@@ -1,6 +1,6 @@
 [package]
 name = "phase1-demo"
-description = "Phase 1 CLI demo: hot-reloads the PD-31 speed envelope and prints figures plus a replay hash."
+description = "Phase 1 CLI demo: hot-reloads the PD-31 speed envelope and prints figures plus a final state hash."
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true

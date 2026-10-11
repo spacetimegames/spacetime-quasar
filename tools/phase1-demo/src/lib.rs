@@ -1,5 +1,5 @@
 //! The Phase 1 CLI demo: edit a `.ron` value, see the new figures and a new
-//! replay hash.
+//! final state hash.
 //!
 //! Purpose: PD-31 asks the owner to feel the speed and scale numbers before a
 //! ship exists. This crate loads the envelope from `assets/space_envelope`,

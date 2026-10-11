@@ -1,9 +1,9 @@
 = Try Phase 1
-:description: A hands-on checklist for the Phase 1 CLI demo: edit a speed or distance and see what it means, plus a replay hash.
+:description: A hands-on checklist for the Phase 1 CLI demo: edit a speed or distance and see what it means, plus a final state hash.
 
 Phase 1 has no window and no ship.
 What it can do is let you feel the speed and scale numbers of xref:../../decisions/pd-31-speed-and-scale-envelope.adoc[PD-31] before Phase 2 shows a ship: you edit a number in a text file, and a terminal shows what it means in everyday terms.
-It also proves two engineering points: a bad edit never breaks the running values, and the same data always gives the same replay hash.
+It also proves two engineering points: a bad edit never breaks the running values, and the same data always gives the same final state hash.
 This page is a checklist you can follow without engineering knowledge.
 
 == Start it
@@ -36,10 +36,10 @@ A block of text, headed `started (data generation 0)`, with four parts:
 
 * *validated values*: the numbers from the file `assets/space_envelope/pd-31.ron`, as the program understood them.
 * *what that feels like*: the same speeds in km/h, compared with a walking person, a car, a jet airliner, the speed of sound, a rifle bullet and the International Space Station; how long it takes to reach the next body, the edge of the system and the other side; and the system radius compared with a marathon, Italy, the Earth and the Moon.
-* *replay*: two test ships fly from one edge of the system to the other, one at normal speed and one at cruise speed, in the deterministic simulation. The last line is the *replay hash*, 16 hex digits.
+* *replay*: two test ships fly from one edge of the system to the other, one at normal speed and one at cruise speed, in the deterministic simulation. The last line is the *final state hash*, 16 hex digits: a fingerprint of the simulation's state after the last tick. It is not yet the "replay hash" of xref:../../adr/0009-command-log-and-replay-format.adoc[ADR 0009]; replay files come later.
 * *data hash*: a fingerprint of the file's meaning.
 
-With the starting numbers, the replay hash on the reference dev machine is `a9089ca937be4c77`.
+With the starting numbers, the final state hash on the reference dev machine is `a9089ca937be4c77`.
 The trip times at normal speed to the next body are 1 min 00 s to 2 min 00 s, which is the "1 to 2 minutes" of PD-31.
 
 == What to try
@@ -49,10 +49,10 @@ The terminal answers within about a second.
 Every value has a short comment above it that says what it is.
 
 * [ ] Start it. Good: the block above appears and the terminal prompt does not come back.
-* [ ] Press Ctrl-C, start it again. Good: the replay hash is the same as the first time. Same data, same hash.
-* [ ] Change `normal_speed_mps: 1000.0` to `500.0` and save. Good: a new block headed `RELOADED (data generation 1)` shows 500 m/s, every time doubled, and a new replay hash (`24fcb49460d0ccec` on the reference dev machine).
+* [ ] Press Ctrl-C, start it again. Good: the final state hash is the same as the first time. Same data, same hash.
+* [ ] Change `normal_speed_mps: 1000.0` to `500.0` and save. Good: a new block headed `RELOADED (data generation 1)` shows 500 m/s, every time doubled, and a new final state hash (`24fcb49460d0ccec` on the reference dev machine).
 * [ ] Change it back to `1000.0` and save. Good: the first hash returns.
-* [ ] Change the jet airliner's `mps: 250.0` to `300.0` and save. Good: the comparison lines change, and the replay hash does not, because the yardsticks are only for the printout.
+* [ ] Change the jet airliner's `mps: 250.0` to `300.0` and save. Good: the comparison lines change, and the final state hash does not, because the yardsticks are only for the printout.
 * [ ] Change `normal_speed_mps` to `-5.0` and save. Good: the block is headed `EDIT REJECTED`, the values shown are marked `OLD values`, and at the bottom a line starting `error[validation]` names the file, the line and the column.
 * [ ] Wait ten seconds without touching anything. Good: the same error is shown again under `STILL WAITING`. It stays until you fix the file.
 * [ ] Break the file on purpose, for example delete a comma, and save. Good: an `error[syntax]` line with the file, line and column. The old values are still shown.
@@ -113,7 +113,7 @@ Owner hands-on test: pending.
 The agent runs below were on the reference dev machine (Linux x86_64, NixOS), 2026-10-11.
 
 * Run it, edit a value, make a bad edit, wait for the reminder, fix the file, and stop it with SIGINT (exit status 130): done by an agent. Transcript in the SPAC-108 pull request.
-* The replay hash of the starting values is `a9089ca937be4c77`, and the same value comes back after an edit and the edit back: done by an agent.
+* The final state hash of the starting values is `a9089ca937be4c77`, and the same value comes back after an edit and the edit back: done by an agent.
 * The tests of the `phase1-demo` package pin the same hash for the same numbers. They pass on Linux and on `wasm32-wasip1` under wasmtime (agent runs). The Windows and macOS test jobs run the same tests; their result is in the pull request.
 
 == Known limits
