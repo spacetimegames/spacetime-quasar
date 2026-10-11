@@ -48,7 +48,7 @@ nix develop
 | `docs/` | All documentation; start at xref:docs/index.adoc[the docs index].
 | `docs/adr/` | Architecture Decision Records.
 | `docs/decisions/` | Product decisions of record.
-| `crates/` | Workspace crates (`st-*`); mostly stubs so far.
+| `crates/` | Workspace crates (`st-*`); `st-rng`, `st-time`, `st-data` and `st-platform` are implemented; the rest are stubs so far.
 | `apps/` | The thin game binary; it opens the window.
 | `tools/xtask/` | Developer task runner.
 | `flake.nix`, `flake.lock` | Nix package, checks and development shell.
