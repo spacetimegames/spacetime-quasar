@@ -17,6 +17,10 @@ use crate::command::{Command, CommandKind, ControlState, PilotId, StepError};
 use crate::hash::{DumpLine, HashError};
 use crate::sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
 
+mod kernels;
+
+pub use kernels::{EDGE, MathKernels, math_kernels};
+
 /// Attractor strength shared by the scenarios, in m^3/s^2.
 const MU: f64 = 1.0e9;
 /// Distance from the origin of the far-out scenarios: 500 km, where `f32`

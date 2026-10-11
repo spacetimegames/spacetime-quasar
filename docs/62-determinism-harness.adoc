@@ -2,14 +2,14 @@
 :description: How to run the cross-platform determinism harness locally and what it checks.
 
 The simulation must be bit-identical on every platform (xref:adr/0008-determinism-implementation.adoc[ADR 0008]).
-The harness runs a few small scenarios on `st-sim`, takes the state hash every 120 ticks, and compares the result with a committed reference file.
+The harness runs a few small scenarios, takes the state hash every 120 ticks, and compares the result with a committed reference file.
 CI runs it on Linux, Windows, macOS and `wasm32-wasip1` (under wasmtime).
 
 Status: minimal simulation, complete comparison.
-`st-sim` has a handful of bodies and one command kind, and the harness has three scenarios.
+`st-sim` has a handful of bodies and one command kind, and the harness has five scenarios: three simulation scenarios, `math-kernels` and `data-fixtures` (SPAC-126).
 The four producer jobs upload their output, the `determinism` job compares the four files with each other and with the reference, the leak detector runs on x86_64 Linux, and `--dump-tick` writes the canonical hash input for diffing (SPAC-125).
 
-From ADR 0009, these are not built yet: replay files (`st_sim::replay`) and replay scenarios, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, session commands, the `StepError` variants `NotExternal` and `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits. The three scenarios are interim and use different names from the scenarios in ADR 0008.
+From ADR 0009, these are not built yet: replay files (`st_sim::replay`) and replay scenarios, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, session commands, the `StepError` variants `NotExternal` and `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits. The three simulation scenarios are interim and use different names from the scenarios in ADR 0008 (`physics-swarm` and `combat-60s` are not built yet).
 
 Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38130979625 passed the harness, the uploads and the `determinism` compare job on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
 
@@ -27,10 +27,17 @@ Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in t
 
 | `swarm-controls`
 | 64 ships 500 km from the origin, one pilot each. The control changes (with gaps in the sequence numbers) come from `st-rng`. 2,400 ticks (20 s).
+
+| `math-kernels`
+| No simulation: the `st-math` kernels with fixed inputs. Tick 0 runs a table of 24 edge values (signed zeros, the smallest subnormal, tiny and huge magnitudes, `pi`, angles beyond argument reduction, `f64::MAX`) through every `det` function. Each of ticks 1 to 1,200 (10 s) draws its inputs from `st-rng` and runs every `det` function, the Kepler solver with the element and state-vector conversions and propagation of `orbit` (on valid and on rejected inputs), and `lerp`, `nlerp`, `slerp` and the Hermite curve and velocity of `interp`.
+
+| `data-fixtures`
+| No simulation: the four `ship_design` fixture files of `st-data` (versions 1, 2 and 3 and the version-3 file that version 1 migrates to) loaded through the migration chain as one data set. One line, at tick 0: FNV-1a 64 of the 32-byte data-set hash.
 |===
 
-The scenarios are in `st_sim::scenarios`.
-Each has a seed, a setup, a command log (sorted by tick, pilot and sequence number) and a tick count.
+The simulation scenarios are in `st_sim::scenarios`, and so is `math-kernels` (`st_sim::scenarios::math_kernels`): ADR 0008 does not say where it lives, and the harness reaches `st-math` and `st-rng` through `st-sim`, as it does for `physics-swarm`.
+`data-fixtures` is in the harness crate (`tools/determinism/src/fixtures.rs`), because ADR 0008 makes the harness the user of `st-data` and `st-sim` does not depend on it.
+Each simulation scenario has a seed, a setup, a command log (sorted by tick, pilot and sequence number) and a tick count.
 The simulation advances only through `Sim::step`, which takes that tick's commands.
 Commands name a pilot, and a pilot controls a ship; nothing treats one pilot as the player.
 
@@ -39,6 +46,13 @@ The tick is zero-padded to 8 digits and the hash is 16 lower-case hex digits.
 Lines are sorted and end with LF.
 Checkpoints are tick 0, every 120 ticks (1 s) and the final tick.
 The hash is FNV-1a 64 over the canonical byte stream of ADR 0008 (format version 1).
+
+`math-kernels` hashes one stream per tick, `STQK` header (format version, tick, seed and the hash of the previous tick) then the sections `DETM`, `ORBT` and `INTP` (tick 0 has `EDGE` instead), and the tick's hash is the checkpoint value, so a checkpoint covers every earlier tick.
+It writes `f64` results as bit patterns, and a result that is a `Result` or an `Option` as a tag byte and the value or an error code.
+A NaN result fails the scenario with exit status 2 (ADR 0008 treats a NaN as an error), so the inputs are chosen inside each function's domain.
+The sign of a zero result of `min`, `max` and `clamp` is not part of an `f64` hash (`-0.0` is written as `+0.0`), so tick 0 writes it as a separate byte.
+`data-fixtures` ignores `--checkpoint-every` (it has one tick), and its dump is one `DSET` line holding the 32 bytes of the data-set hash.
+The fixture files are the ones `st-data` tests; the schema the harness loads them with mirrors the test schema, and a unit test pins the content hashes to the golden values in `crates/st-data/tests/golden.rs`.
 
 The harness package is `tools/determinism`.
 The expected output is `tools/determinism/reference.txt`.
@@ -116,6 +130,7 @@ A dump line is `<scenario> <tick, 8 digits> <section> <id or -> <hex>`.
 There is one line per section header (`STQH`, `ENTS`, `PILT`, `GLOB`, id `-`) and one per entity (`ENTS`, the ship id) or pilot (`PILT`, the pilot id).
 The hex is the canonical byte stream of ADR 0008 for that line (format version 1), so concatenating the bytes of all lines of one scenario and hashing them with FNV-1a 64 gives the checkpoint hash (a test checks this).
 The first differing line names the entity, and the first differing byte names the field: `f64` values are 8-byte little-endian bit patterns, written in the order of `Ship::state_hash_with_id` (`crates/st-sim/src/sim.rs`).
+For `math-kernels` the lines are the sections `STQK`, `EDGE` (tick 0) or `DETM`, `ORBT` and `INTP`, with id `-`; the offset of the first differing byte in a section names the function, in the order of the code in `crates/st-sim/src/scenarios/kernels.rs`. For `data-fixtures` the one line is `DSET`.
 Without `--scenario`, the dump has the lines of every scenario that reaches the tick.
 
 == The leak detector
@@ -158,17 +173,17 @@ Download them from the run page to inspect a failure.
 
 The comparison is `tools/ci/determinism-compare.sh <artifacts-dir> <reference-file>`; run it on a directory laid out like the downloaded artifacts to try it locally.
 It exits 0 when all is equal, 1 on a mismatch or a missing or unexpected file.
-The checks also reject a vacuous pass: the reference and every output must be non-empty, end with a newline, and have a line for each scenario of the reference, which must have at least three (`MIN_SCENARIOS` in the script, to be raised when scenarios are added).
+The checks also reject a vacuous pass: the reference and every output must be non-empty, end with a newline, and have a line for each scenario of the reference, which must have at least five (`MIN_SCENARIOS` in the script, to be raised when scenarios are added).
 An artifact directory with any file besides its own is rejected too.
 
 A mismatch report looks like this (an illustration: the `wasm32` hash is the reference hash with its last character altered by hand):
 
 ----
 MISMATCH: wasm32 differs from the reference
-first difference at line 5 (scenario orbit-coast, tick 00000480)
+first difference at line 17 (scenario orbit-coast, tick 00000480)
     reference              orbit-coast 00000480 2c4aac5970b09a31
     wasm32                 orbit-coast 00000480 2c4aac5970b09a3X
-    1 of 38 lines differ
+    1 of 50 lines differ
 ----
 
 The new job name is `determinism` `[ci-tested]`: it passed with four equal files in run 38130979625.

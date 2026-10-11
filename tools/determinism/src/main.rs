@@ -117,7 +117,7 @@ fn fail(e: &determinism::Error) -> ExitCode {
         determinism::Error::UnknownScenario(_) | determinism::Error::TickPastEnd(_) => {
             ExitCode::from(1)
         }
-        determinism::Error::Run { .. } => ExitCode::from(2),
+        determinism::Error::Run { .. } | determinism::Error::Fixtures(_) => ExitCode::from(2),
     }
 }
 
