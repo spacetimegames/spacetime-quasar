@@ -132,6 +132,7 @@ leak-detector: FAIL, the platform libm was called (see LEAK lines)
 
 A clean run prints `leak-detector: ok, no platform libm call outside the allow-list`.
 Any symbol outside the allow-list (`log2`, `fma` and `fmaf` today, each with its reason in `tools/determinism/src/leak.rs`) makes the harness exit with status 3, after it has written the result file.
+To test the exit-3 path, setting `DETERMINISM_LEAK_SELF_TEST` makes the run call the platform `cos` once; `tools/determinism/tests/cli.rs` uses it to check exit status 3 and the `LEAK` line.
 The module is compiled into the binary only, on `cfg(all(target_os = "linux", target_arch = "x86_64"))`; tests and other platforms behave like the game and print nothing.
 It is the one place in the workspace that allows `unsafe` (ADR 0008).
 The simulation does not call the platform libm today, so the current allow-list is unused.
@@ -157,7 +158,10 @@ Download them from the run page to inspect a failure.
 
 The comparison is `tools/ci/determinism-compare.sh <artifacts-dir> <reference-file>`; run it on a directory laid out like the downloaded artifacts to try it locally.
 It exits 0 when all is equal, 1 on a mismatch or a missing or unexpected file.
-A mismatch report looks like this:
+The checks also reject a vacuous pass: the reference and every output must be non-empty, end with a newline, and have a line for each scenario of the reference, which must have at least three (`MIN_SCENARIOS` in the script, to be raised when scenarios are added).
+An artifact directory with any file besides its own is rejected too.
+
+A mismatch report looks like this (an illustration: the `wasm32` hash is the reference hash with its last character altered by hand):
 
 ----
 MISMATCH: wasm32 differs from the reference

@@ -175,6 +175,23 @@ fn called() -> Vec<(&'static str, u64)> {
     v
 }
 
+/// Name of the environment variable that makes [`self_test`] call the
+/// platform `cos` once.
+pub const SELF_TEST_VAR: &str = "DETERMINISM_LEAK_SELF_TEST";
+
+/// Test hook for the exit-3 path: if [`SELF_TEST_VAR`] is set, calls `cos`
+/// through std, which must land in this module's `cos` and be counted as a
+/// leak. It lets a committed test prove that the detector fails a run.
+pub fn self_test() {
+    if std::env::var_os(SELF_TEST_VAR).is_some() {
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "deliberate platform libm call for the leak detector self-test: ADR 0008"
+        )]
+        let _ = std::hint::black_box(std::hint::black_box(1.0_f64).cos());
+    }
+}
+
 /// Builds the report from the counters. Call it after the scenarios ran.
 pub fn report() -> Report {
     let mut text = String::new();

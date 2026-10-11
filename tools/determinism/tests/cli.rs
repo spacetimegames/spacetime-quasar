@@ -88,6 +88,27 @@ fn dump_tick_writes_one_hex_line_per_section_and_entity() {
     );
 }
 
+/// The exit-3 path: a platform libm call outside the allow-list fails the run
+/// after the result file has been written. The hook is in the binary because
+/// the simulation itself must never make such a call.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn a_platform_libm_call_exits_with_3() {
+    let report = temp("leak-self-test.txt");
+    let out = Command::new(env!("CARGO_BIN_EXE_determinism"))
+        .args(["--out", report.to_str().unwrap(), "--scenario", "solo-burn"])
+        .env("DETERMINISM_LEAK_SELF_TEST", "1")
+        .output()
+        .expect("the harness binary starts");
+    let written = report.exists();
+    let _ = std::fs::remove_file(&report);
+    assert_eq!(out.status.code(), Some(3), "{out:?}");
+    assert!(written, "the result file is written before the verdict");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("leak-detector: cos 1 LEAK"), "{stdout}");
+    assert!(stdout.contains("leak-detector: FAIL"), "{stdout}");
+}
+
 #[test]
 fn a_clean_run_reports_the_leak_detector_on_x86_64_linux() {
     let report = temp("leak-report.txt");

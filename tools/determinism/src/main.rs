@@ -7,7 +7,9 @@
 //!
 //! Exit status: 0 success, 1 usage or I/O error, 2 a scenario failed (for
 //! example a `HashError`), 3 the leak detector saw a platform libm call
-//! outside its allow-list.
+//! outside its allow-list. On x86_64 Linux, setting
+//! `DETERMINISM_LEAK_SELF_TEST` makes the run call the platform `cos` once so
+//! that the exit-3 path can be tested.
 
 use std::ffi::OsString;
 use std::process::ExitCode;
@@ -83,6 +85,7 @@ fn main() -> ExitCode {
 /// Prints the leak detector's counts and maps a leak to exit status 3.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn leak_check() -> ExitCode {
+    leak::self_test();
     let report = leak::report();
     print!("{}", report.text);
     if report.leaked {
