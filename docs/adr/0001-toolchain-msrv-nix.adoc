@@ -7,7 +7,7 @@ toc::[]
 
 Accepted. The MSRV (1.88) is amended by
 xref:0007-large-world-coordinates.adoc[ADR 0007]: it became 1.89 in the PR
-that added `rapier3d-f64` (SPAC-128). Where this ADR says 1.88 below, read 1.89.
+that added `rapier3d-f64` (SPAC-128). The sections below state the current value, 1.89; 1.88 stays only where it is history (the release that stabilised let chains, the original choice).
 
 == Date
 
@@ -107,23 +107,23 @@ targets = [
 === MSRV
 
 * The workspace `Cargo.toml` sets `edition = "2024"` and
-  `rust-version = "1.88"` under `[workspace.package]`; every member inherits
+  `rust-version = "1.89"` under `[workspace.package]`; every member inherits
   both with `edition.workspace = true` and `rust-version.workspace = true`.
 * The workspace `Cargo.toml` sets `resolver = "3"` explicitly under
   `[workspace]`. Setting the edition in `[workspace.package]` does not select
   a resolver, and a virtual workspace otherwise falls back to resolver `1`.
   MSRV-aware resolution depends on resolver `3`: it is what makes
   `cargo update` prefer dependency versions whose `rust-version` is at most
-  1.88, so that `Cargo.lock` stays buildable by the `msrv` job where
+  1.89, so that `Cargo.lock` stays buildable by the `msrv` job where
   possible.
-* Why 1.88 rather than the 1.87 floor: let chains (stable in 1.88, edition
+* Why 1.88 rather than the 1.87 floor (the original choice, raised to 1.89 for Rapier): let chains (stable in 1.88, edition
   2024) are the most ergonomic language change in that range, and no
   approved dependency needs anything newer.
 * Clippy reads `rust-version` and reports standard-library APIs newer than
   the MSRV (`incompatible_msrv`), so the pinned-toolchain clippy gate already
   catches most violations before the MSRV job runs.
 * The `msrv` CI job (xref:0003-ci-design.adoc[ADR 0003]) builds the workspace
-  with exactly 1.88.0.
+  with exactly 1.89.0.
 * Bump policy: the MSRV moves only by ADR, and only when an approved
   dependency requires a newer compiler or a stabilised feature or API has a
   concrete use in the code. It never goes below 1.87 and never above the
@@ -229,7 +229,7 @@ MSRV equal to the pinned toolchain::
 * The MSRV job adds one Linux build per PR. Lockfile updates can pull a
   dependency release that needs a newer compiler; the `msrv` job catches it,
   and the fix is to hold that dependency back or bump the MSRV by ADR.
-* Code may use let chains; std APIs newer than 1.88 fail clippy.
+* Code may use let chains; std APIs newer than 1.89 fail clippy.
 * Builders implementing the flake have exact choices: rust-overlay, crane,
   `nixpkgs-unstable`, systems `x86_64-linux` and `aarch64-darwin`, `nixfmt`,
   no module and no overlay.

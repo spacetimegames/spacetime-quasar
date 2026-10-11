@@ -9,7 +9,7 @@ Accepted. The replay version policy (version-locked replays) is an
 assumption pending owner confirmation; see <<product-questions>>.
 Update 2026-10-11: PD-33 confirms version-locked replays and makes them player-facing in the MVP.
 Erratum 2026-10-11: until `physics-swarm` and `combat-60s` exist, the replay pin covers every scenario except `data-fixtures` (SPAC-127).
-Erratum 2026-10-11 (SPAC-128): `physics-swarm` and `combat-60s` exist now, so the replay pin covers exactly the three scenarios named under "Version policy" (`physics-swarm`, `math-kernels`, `combat-60s`) and their `.replay` lines. The interim scenarios `solo-burn`, `orbit-coast` and `swarm-controls` and `data-fixtures` are not pinned. The setup encoding gained the hull, weapon, team, hit points and AI pilots, and `SIM_VERSION` is 2.
+Erratum 2026-10-11 (SPAC-128): `physics-swarm` and `combat-60s` exist now, so the replay pin covers exactly the three scenarios named under "Version policy" (`physics-swarm`, `math-kernels`, `combat-60s`) and their `.replay` lines. The interim scenarios `solo-burn`, `orbit-coast` and `swarm-controls` and `data-fixtures` are not pinned. The setup encoding gained the hull, weapon, team, hit points, AI pilots, the speed cap (`max_speed_mps`) and the AI parameters (`AiParams`), and `SIM_VERSION` is 2.
 
 == Date
 
