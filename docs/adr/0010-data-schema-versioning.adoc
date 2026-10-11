@@ -242,13 +242,20 @@ struct name:
   `Option` field is written as a bare value or omitted (with
   `#[serde(default)]`). A file may enable further extensions with
   `#![enable(..)]`; the content hash does not depend on syntax.
+* Struct names are optional in the payload as in the envelope. `ron` accepts
+  an omitted name and rejects a written name that differs from the Rust type
+  name (verified). Tools that write RON omit names, and the hash ignores
+  them. A shipped file that writes a name makes renaming that Rust type a
+  schema change; the asset test catches it.
 * Loading takes two passes over the same bytes:
 . *Header pass* (lenient): deserialise
   `{ kind: String, version: u32, data: IgnoredAny }`, ignoring unknown
   header fields. Syntax errors surface here with their position. The loader
   then checks `kind` and `version` before it knows the payload type, so a
   file from a newer build always yields `version-too-new`, even if a later
-  ADR adds header fields.
+  ADR adds header fields. `wrong-kind` fires when the caller loads a known
+  type and the header names another kind; `unknown-kind` fires when the
+  data set dispatches by kind and no type is registered for it.
 . *Strict pass*: deserialise the envelope with the payload type for that
   version, with `deny_unknown_fields` on the envelope and on every schema
   type.
@@ -257,6 +264,13 @@ struct name:
   version; how they are packaged is the save ADR's choice.
 
 === Compatibility policy
+
+The policy is *upgrade-safe*: older files open in newer builds; older builds
+refuse newer files with a clear message. This is how this ADR reads the
+charter's "forward-compatible" saves: files keep working as the game moves
+forward, not that an older build reads a newer file. The policy awaits
+owner confirmation together with the save behaviour (G11, Phase 3) and can
+be revisited by a superseding ADR.
 
 Kinds fall into two classes. The class is a policy, documented in the
 owning crate next to the kind; it is not a runtime flag.
@@ -319,7 +333,9 @@ Every type reachable from a payload follows these rules; the
 * Floats are `f32` or `f64` and must be finite; NaN and infinities are
   rejected at load by the canonical encoder (`non-finite`). `-0.0` is kept
   as written.
-* No `i128` or `u128` (the `ron` feature `integer128` is off).
+* No `i128` or `u128` (the `ron` feature `integer128` is off). The
+  canonical encoder rejects them with a `type` diagnostic, so a schema type
+  that uses them fails on its first load and in its golden test.
 * The loader is a backstop for the first rule: it wraps the deserialiser in
   `serde_ignored`, and any field that was ignored anyway (a type missing
   `deny_unknown_fields`) is an error `schema-not-strict` with its path, so a
@@ -401,6 +417,12 @@ the same `KIND`.
   the referenced kind's version changes. Content hashes serve integrity,
   deduplication of shared designs (a server can recompute and compare,
   PD-04) and the data-set identity used by replays.
+* *Stable only within a schema version.* After a version bump, the same
+  file migrates to a new value at a new version and gets a new hash. A hash
+  stored elsewhere, for example one a server recorded for a shared design,
+  then no longer matches. Whoever stores a content hash stores the kind's
+  version with it, and treats a mismatch at a different version as "re-hash
+  after migration", not as a changed or tampered design.
 * *Data-set hash:* `st-data` also hashes a set of loaded files, as BLAKE3
   (same mode, context `"st-data 2026-10-11 data set hash v1"`) over the
   canonical encoding of the list of (`kind`, source name, content hash),
@@ -504,8 +526,10 @@ error[unknown-field]: assets/ships/shuttle.ron:7:9: sections[0]: unknown field `
   bookkeeping is ordinary code that takes bytes.
 * *Watcher:* polling, no dependency and no thread. `st-platform` exposes a
   watcher that the main loop calls once per frame. Each call reads metadata
-  for at most 256 files of the watched roots, round-robin, and lists
-  directories to notice added and removed files. A change is a different
+  for at most 256 entries of the watched roots, round-robin, and lists
+  directories to notice added and removed files. Directory listings count
+  toward the same 256-entry budget, so the listing is also sliced across
+  frames and no call walks a whole tree. A change is a different
   modification time or length. Changes are released as one batch once no
   further change has been seen for 200 ms, which absorbs editors that write
   a temporary file and rename it, and "save all". At the measured cost this
@@ -548,6 +572,13 @@ error[unknown-field]: assets/ships/shuttle.ron:7:9: sections[0]: unknown field `
   a version bump and any drift in the canonical encoding, and they run on
   every platform in CI (Linux, Windows, macOS tests; `wasm32-wasip1` through
   the Phase 1 determinism harness).
+* *Float-bit golden test:* a dedicated `st-data` test parses a fixed list
+  of literals (at least those in the verified table, plus subnormals, values
+  near `f32::MAX` and `f64::MAX`, and integer literals) into `f32` and `f64`
+  and compares the bit patterns with recorded constants. It runs on all four
+  CI targets: the three native `test` jobs and `wasm32-wasip1` under
+  wasmtime, which the `wasm32` job gains together with the Phase 1
+  determinism harness.
 * *Asset test:* an integration test in the crate that wires content
   (`st-game`) loads every `+assets/**/*.ron+` file, requires its kind's current
   version (`outdated-asset` otherwise), runs validation and cross-file checks,
@@ -595,8 +626,13 @@ this ADR.
 |===
 
 All five are under `MIT OR Apache-2.0` except `blake3`
-(`CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception`); all pass the
-current `deny.toml`. Together they add 8 packages to `Cargo.lock`. `blake3`
+(`CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception`), which is
+admitted through its `Apache-2.0` alternative (patent grant); all pass the
+current `deny.toml`. `serde_path_to_error` and `serde_ignored` have had no
+release in the last 12 months (last 2025-09-15 and 2025-09-14); they are
+admitted as demonstrably finished under ADR 0002: each is a small
+single-purpose adapter over serde 1.x's stable `Deserializer` trait, owned
+by serde's maintainer. Together they add 8 packages to `Cargo.lock`. `blake3`
 builds no native code with `pure`, so the "links native code" admission
 criterion of ADR 0002 does not apply; it is covered here anyway because of
 the build script. `st-platform` gains no dependency.
@@ -609,8 +645,10 @@ following.
 
 ADR 0006, math boundary::
   Offers: `f32` and `f64` parse to the correctly rounded value of the
-  literal on every target, through the `FromStr` implementation in `core`, whichever precision
-  0006 chooses for simulation state. Needs: math types that appear in data
+  literal through the `FromStr` implementation in `core`, whichever
+  precision 0006 chooses for simulation state. Identical bits are verified
+  on Linux x86_64 and wasm32 only; Windows and macOS are assumed until the
+  float-bit golden test (<<testing>>) passes in CI. Needs: math types that appear in data
   files (vectors, angles, quantities) derive `Serialize` and `Deserialize`
   under the rules for schema types, as plain RON structs or tuples. Any
   migration that must do float arithmetic calls 0006's deterministic
