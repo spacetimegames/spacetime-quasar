@@ -6,5 +6,20 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# On by default so that the workspace tests exercise it. A release build
+# disables it with `default-features = false` (ADR 0010, "Hot reload"). The
+# module compiles to nothing on wasm32.
+default = ["hot-reload"]
+hot-reload = ["dep:st-platform", "dep:st-data", "dep:st-time", "st-platform/hot-reload"]
+
+[dependencies]
+st-data = { path = "../st-data", optional = true }
+st-platform = { path = "../st-platform", optional = true }
+st-time = { path = "../st-time", optional = true }
+
+[dev-dependencies]
+serde.workspace = true
+
 [lints]
 workspace = true
