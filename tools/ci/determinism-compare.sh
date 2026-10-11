@@ -13,7 +13,7 @@
 # Guards against a vacuous pass (four empty files are equal to an empty
 # reference): the reference and every output must be non-empty, end with a
 # newline, and have at least one line for each of at least MIN_SCENARIOS
-# scenario names of the reference (the harness has eight). Each artifact directory
+# scenario names of the reference (the harness has twelve). Each artifact directory
 # must hold exactly its one expected file. When GITHUB_STEP_SUMMARY is set, a summary table is appended.
 #
 # Exit status: 0 all equal, 1 mismatch or a missing/extra file, 2 usage.
@@ -28,10 +28,10 @@ dir=$1
 reference=$2
 platforms=(linux-x86_64 windows-x86_64 macos-aarch64 wasm32)
 failed=0
-# The reference has eight scenario names: the five scenarios and the three
+# The reference has twelve scenario names: the seven scenarios and the five
 # `.replay` lines of the scenarios that have commands (docs/62-determinism-harness.adoc); raise
 # this when scenarios are added so that a truncated reference cannot pass.
-MIN_SCENARIOS=8
+MIN_SCENARIOS=12
 
 if [ ! -f "$reference" ]; then
   echo "error: reference file $reference does not exist" >&2

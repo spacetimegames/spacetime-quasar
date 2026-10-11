@@ -12,6 +12,9 @@ st-math = { path = "../st-math" }
 st-rng = { path = "../st-rng" }
 st-time = { path = "../st-time" }
 
+# ADR 0007, ADR 0008: the only crate that depends on the physics stack.
+rapier3d-f64.workspace = true
+
 # The replay header is an ADR 0010 envelope (ADR 0009).
 serde.workspace = true
 

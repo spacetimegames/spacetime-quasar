@@ -58,7 +58,16 @@ fn the_same_data_gives_the_same_hash() {
 fn the_fixture_hash_is_pinned() {
     let replay = scenario::replay(&envelope(&fixture())).unwrap();
     assert_eq!(replay.ticks, 481_200);
-    assert_eq!(format!("{:016x}", replay.hash), "a9089ca937be4c77");
+    assert_eq!(format!("{:016x}", replay.hash), "8c2b6ba222156ecd");
+}
+
+/// The hash the try-note (docs/handoff/try/phase-1.adoc) tells the owner to expect after
+/// editing `normal_speed_mps` to 500.0, so that the note cannot drift from the code.
+#[test]
+fn the_try_note_hash_at_500_is_pinned() {
+    let env = envelope(&text("500.0", "2000.0", "(min: 60.0, max: 120.0)", ""));
+    let replay = scenario::replay(&env).unwrap();
+    assert_eq!(format!("{:016x}", replay.hash), "89f12b6e933fea4f");
 }
 
 #[test]
@@ -93,7 +102,7 @@ fn the_simulation_agrees_with_the_derived_trip_times() {
         }
         sim.step(&s.commands[start..next]).unwrap();
         let (cruise, _) = sim.ship_state(2).unwrap();
-        if cruise_arrived.is_none() && cruise.x >= 0.0 && sim.tick() > 2 {
+        if cruise_arrived.is_none() && cruise.z >= 0.0 && sim.tick() > 2 {
             cruise_arrived = Some(sim.tick());
         }
     }
@@ -101,9 +110,9 @@ fn the_simulation_agrees_with_the_derived_trip_times() {
     for id in [1, 2] {
         let (position, velocity) = sim.ship_state(id).unwrap();
         assert!(
-            (position.x - radius).abs() < 100.0,
+            (position.z - radius).abs() < 100.0,
             "ship {id} at {}",
-            position.x
+            position.z
         );
         assert!(
             velocity.length() < 0.1,
@@ -119,6 +128,45 @@ fn the_simulation_agrees_with_the_derived_trip_times() {
         (half - 250.0).abs() < 1.0,
         "cruise ship at the centre after {half} s"
     );
+}
+
+/// PD-31 is provisional: no code constant may cap the speed an owner puts in the data. With
+/// a cruise speed above the old 20 km/s constant, the cruise ship must reach it and arrive.
+#[test]
+fn a_cruise_speed_above_20_km_per_s_is_not_clamped() {
+    let env = envelope(
+        r#"(kind: "space_envelope", version: 1, data: (
+    normal_speed_mps: 1000.0, cruise_multiplier: 30.0, system_radius_km: 2000.0,
+    body_spacing_km: (min: 60.0, max: 120.0), acceleration_mps2: 1000.0, replay_seed: 31,
+    reference_speeds: [], reference_lengths: []))"#,
+    );
+    assert_eq!(env.cruise_speed_mps(), 30_000.0);
+    let s = scenario::build(&env).unwrap();
+    assert_eq!(s.setup.max_speed_mps, 60_000.0);
+    let mut sim = Sim::new(&s.setup, s.seed).unwrap();
+    let mut next = 0;
+    let mut peak = 0.0_f64;
+    while sim.tick() < s.ticks {
+        let tick = sim.tick();
+        let start = next;
+        while next < s.commands.len() && s.commands[next].tick <= tick {
+            next += 1;
+        }
+        sim.step(&s.commands[start..next]).unwrap();
+        let speed = sim.ship_state(2).unwrap().1.length();
+        if speed > peak {
+            peak = speed;
+        }
+    }
+    assert!(peak > 29_000.0, "the cruise ship peaked at {peak} m/s");
+    let (position, velocity) = sim.ship_state(2).unwrap();
+    // Switching thrust on a tick boundary costs up to v * DT = 250 m at this speed.
+    assert!(
+        (position.z - 2_000_000.0).abs() < 1_000.0,
+        "at {}",
+        position.z
+    );
+    assert!(velocity.length() < 0.1);
 }
 
 #[test]
@@ -137,7 +185,7 @@ fn a_short_trip_is_triangular_and_still_arrives() {
         sim.step(&s.commands[start..next]).unwrap();
     }
     let (position, velocity) = sim.ship_state(1).unwrap();
-    assert!((position.x - 10_000.0).abs() < 5.0, "at {}", position.x);
+    assert!((position.z - 10_000.0).abs() < 5.0, "at {}", position.z);
     assert!(velocity.length() < 0.1);
 }
 

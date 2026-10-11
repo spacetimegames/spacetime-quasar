@@ -158,13 +158,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup toolchain install 1.88.0 --profile minimal
+      - run: rustup toolchain install 1.89.0 --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-bin: false
-      - run: cargo +1.88.0 build --workspace --all-targets --locked
+      - run: cargo +1.89.0 build --workspace --all-targets --locked
 
   deny:
     name: deny

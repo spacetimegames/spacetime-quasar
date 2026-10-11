@@ -4,12 +4,46 @@
 //! command log as its only inputs (ADR 0008, ADR 0009) and advances exactly one
 //! fixed tick of [`DT`](st_time::DT) per [`Sim::step`]. Pilots send
 //! [`Command`]s that steer ships; a pilot is a pilot whether a person, a
-//! replay or a test script feeds it.
+//! replay or a test script feeds it, and AI pilots fly from inside the
+//! simulation.
 //!
-//! This is a minimal version: a few bodies integrated in a plane, one command
-//! kind ([`CommandKind::Controls`]), the canonical state hash
-//! ([`StateHasher`], format version 1) and a handful of
-//! [`scenarios`] for the determinism harness. It uses only
+//! # Physics
+//!
+//! Ships are Rapier rigid bodies (`rapier3d-f64`, ADR 0007), one physics world per
+//! star system, stepped in ascending system id. No Rapier or Parry type appears in a public
+//! signature of this crate. The rules of ADR 0008 hold:
+//!
+//! * a ship is one body with one compound collider built from its [`HullPart`]s, at the
+//!   body origin, with explicit mass properties that `st-sim` computes itself (closed-form
+//!   part inertia, parallel-axis sums, the Jacobi solver of [`st_math::eigen`]), so Rapier and
+//!   Parry never diagonalise an inertia tensor;
+//! * the planar constraint is the `LockedAxes` of ADR 0007 (free motion in the XZ plane and
+//!   yaw about +Y), with gyroscopic forces off so the hull stays in the plane, ships that never
+//!   sleep, and continuous collision detection per ship;
+//! * the integration step is `DT`, the body velocity limit is `Setup::max_speed_mps`, which the
+//!   setup builder derives from data (Rapier's default of 400 m/s would cap normal flight), and
+//!   nothing runs in parallel;
+//! * thrust, strafe, gravity and drag act as impulses and velocities, turning is a rate
+//!   command, and weapons are Parry shape casts through the broad phase.
+//!
+//! The state hash reads each body through Rapier's API (ADR 0008, "State hash") and leaves
+//! out Rapier's caches. [`Sim`] is `Clone`: a clone copies every world and continues bit for
+//! bit.
+//!
+//! # Rules of the game, as far as they exist
+//!
+//! **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+//! replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+//! sections); that change bumps [`SIM_VERSION`]. The hit points, weapons, teams and AI pilots
+//! below exist so that the determinism harness exercises damage, removal and AI inside the
+//! step. They live in one private module (`sim/combat.rs`) that Phase 2 replaces, and their
+//! tuning numbers come from the [`Setup`] ([`AiParams`], [`Weapon`]), not from the step.
+//!
+//! One command kind ([`CommandKind::Controls`]); thrust, strafe, turn and a fire button;
+//! central gravity; ships with hit points and an optional [`Weapon`] that sweeps a ball along
+//! the heading; AI pilots that chase the nearest enemy of another team; destroyed ships leave
+//! their world. The canonical state hash ([`StateHasher`], format version 1) and the
+//! [`scenarios`] of the determinism harness complete the crate. It uses only
 //! [`st_math::det`] for transcendental math and [`st_rng`] for randomness, and
 //! it reads no clock.
 //!
@@ -28,10 +62,12 @@
 //!
 //! Non-goals (not yet built). From ADR 0009: session commands (`AddPilot`,
 //! `RemovePilot`, `SetController`, `DataSetChange`, `Narrative`; their tags
-//! are reserved and decode as an error), AI pilots (so no pilot is controlled
-//! inside the simulation yet, and `StepError::NotExternal` cannot occur in a
-//! real run), persisted snapshots, and the replay viewer and seek cache
-//! (`st-game`, SPAC-121). Also: Rapier physics, weapons, AI, economy.
+//! are reserved and decode as an error), persisted snapshots, and the replay
+//! viewer and seek cache (`st-game`, SPAC-121). Also: joints, multibodies, soft bodies and the
+//! other Rapier features ADR 0008 keeps out, section-level damage, the economy, factions and
+//! missions, and loading ships from data (the pinned scenarios define theirs in code). Also:
+//! no `assets/` data, `st-game` or `apps/` code uses [`Weapon`], hit points, teams or the AI
+//! as game content before Phase 2.
 //!
 //! # Example
 //!
@@ -57,13 +93,18 @@
 
 pub mod command;
 mod hash;
+mod hull;
+mod physics;
 pub mod replay;
 pub mod scenarios;
 mod sim;
 
 pub use command::{Command, CommandKind, ControlState, PilotId, StepError};
 pub use hash::{DumpLine, HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
-pub use sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
+pub use hull::{FIRE, HullPart, MAX_HULL_PARTS, PartShape, Weapon};
+pub use sim::{
+    AiParams, CHECKPOINT_INTERVAL, MAX_SHIPS_PER_SYSTEM, Setup, SetupError, ShipInit, Sim,
+};
 
 /// The simulation version (ADR 0009, "Version policy"). A replay recorded by
 /// one version is refused by every other, because the simulation is
@@ -78,4 +119,4 @@ pub use sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
 /// ```
 /// assert!(st_sim::SIM_VERSION >= 1);
 /// ```
-pub const SIM_VERSION: u32 = 1;
+pub const SIM_VERSION: u32 = 2;

@@ -39,7 +39,8 @@ A block of text, headed `started (data generation 0)`, with four parts:
 * *replay*: two test ships fly from one edge of the system to the other, one at normal speed and one at cruise speed, in the deterministic simulation. The last line is the *final state hash*, 16 hex digits: a fingerprint of the simulation's state after the last tick. It is not yet the "replay hash" of xref:../../adr/0009-command-log-and-replay-format.adoc[ADR 0009]; replay files come later.
 * *data hash*: a fingerprint of everything the file says, the real-world yardsticks included. It moves whenever any value in the file changes, even one that only affects the printout. It is not the simulation's result; compare the *final state hash* for that.
 
-With the starting numbers, the final state hash on the reference dev machine is `a9089ca937be4c77`.
+With the starting numbers, the final state hash on the reference dev machine is `8c2b6ba222156ecd`.
+Before SPAC-128 (Rapier physics, XZ plane) this hash was `a9089ca937be4c77`; seeing that value means your checkout predates the change.
 The trip times at normal speed to the next body are 1 min 00 s to 2 min 00 s, which is the "1 to 2 minutes" of PD-31.
 
 == What to try
@@ -50,7 +51,7 @@ Every value has a short comment above it that says what it is.
 
 * [ ] Start it. Good: the block above appears and the terminal prompt does not come back.
 * [ ] Press Ctrl-C, start it again. Good: the final state hash is the same as the first time. Same data, same hash.
-* [ ] Change `normal_speed_mps: 1000.0` to `500.0` and save. Good: a new block headed `RELOADED (data generation 1)` shows 500 m/s, every time doubled, and a new final state hash (`24fcb49460d0ccec` on the reference dev machine).
+* [ ] Change `normal_speed_mps: 1000.0` to `500.0` and save. Good: a new block headed `RELOADED (data generation 1)` shows 500 m/s, every time doubled, and a new final state hash (`89f12b6e933fea4f` on the reference dev machine).
 * [ ] Change it back to `1000.0` and save. Good: the first hash returns.
 * [ ] Change the jet airliner's `mps: 250.0` to `300.0` and save. Good: the comparison lines change and the *data hash* changes (the file changed), but the *final state hash* stays the same, because the yardsticks are only for the printout and the simulation never reads them.
 * [ ] Change `normal_speed_mps` to `-5.0` and save. Good: the block is headed `EDIT REJECTED`, the values shown are marked `OLD values`, and at the bottom a line starting `error[validation]` names the file, the line and the column.
@@ -115,7 +116,7 @@ The agent runs below were on the reference dev machine (Linux x86_64, NixOS), 20
 
 * Run it, edit a value, make a bad edit, wait for the reminder, fix the file, and stop it with SIGINT (exit status 130): done by an agent. Transcript in the SPAC-108 pull request.
 * Found in the owner's hands-on run and fixed in SPAC-108: after a rejected edit, putting back the identical file printed nothing and the error kept standing. It now prints `RECOVERED`. The jet airliner edit moves the data hash and not the final state hash; the labels in the printout say so. Both checked by an agent against the running program, transcript in the pull request.
-* The final state hash of the starting values is `a9089ca937be4c77`, and the same value comes back after an edit and the edit back: done by an agent.
+* The final state hash of the starting values is `8c2b6ba222156ecd`, and the same value comes back after an edit and the edit back: done by an agent.
 * The tests of the `phase1-demo` package pin the same hash for the same numbers. They pass on Linux and on `wasm32-wasip1` under wasmtime (agent runs). The Windows and macOS test jobs run the same tests; their result is in the pull request.
 
 == Known limits

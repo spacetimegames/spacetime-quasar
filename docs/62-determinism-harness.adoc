@@ -5,13 +5,13 @@ The simulation must be bit-identical on every platform (xref:adr/0008-determinis
 The harness runs a few small scenarios, takes the state hash every 120 ticks, and compares the result with a committed reference file.
 CI runs it on Linux, Windows, macOS and `wasm32-wasip1` (under wasmtime).
 
-Status: minimal simulation, complete comparison.
-`st-sim` has a handful of bodies and one command kind, and the harness has five scenarios: three simulation scenarios, `math-kernels` and `data-fixtures` (SPAC-126).
+Status: Rapier physics in the simulation (SPAC-128), complete comparison.
+`st-sim` runs ships as Rapier bodies with weapons and AI pilots, and the harness has seven scenarios: `physics-swarm` and `combat-60s` (SPAC-128), three interim simulation scenarios, `math-kernels` and `data-fixtures` (SPAC-126).
 The four producer jobs upload their output, the `determinism` job compares the four files with each other and with the reference, the leak detector runs on x86_64 Linux, and `--dump-tick` writes the canonical hash input for diffing (SPAC-125).
 
 Replay files are built (SPAC-127, xref:adr/0009-command-log-and-replay-format.adoc[ADR 0009]): `st_sim::replay`, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, the `StepError` variants `NotExternal` and `TickTooLarge`, the payload (1 MiB) and per-tick (2 MiB) byte limits, `--replay`, `--force` and exit status 4 (see <<_replays>>).
-Not built yet from ADR 0009: session commands (their tags are reserved), AI pilots, and the viewer in `st-game` (SPAC-121).
-The three simulation scenarios are interim and use different names from the scenarios in ADR 0008 (`physics-swarm` and `combat-60s` are not built yet).
+Not built yet from ADR 0009: session commands (their tags are reserved) and the viewer in `st-game` (SPAC-121).
+The three interim simulation scenarios (`solo-burn`, `orbit-coast`, `swarm-controls`) predate `physics-swarm` and `combat-60s`; they stay as small scenarios for localising a divergence, and they are not pinned by `SIM_VERSION`.
 
 Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38130979625 passed the harness, the uploads and the `determinism` compare job on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
 
@@ -20,6 +20,12 @@ Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in t
 [cols="1,3",options="header"]
 |===
 | Scenario | What it runs
+
+| `combat-60s`
+| The charter acceptance test. Two teams of eight fighters 600 m apart and 500 km out fight for 7,200 ticks (60 s). Ship 1 and ship 9 are flown by scripted external pilots (a command log from `st-rng`, fire held); the other fourteen by AI pilots inside the simulation (nearest enemy, standoff distance, a seeded sideways drift, fire when ahead and in range). Weapons are Parry shape casts, hits take hit points, and a destroyed ship leaves its physics world. The ships, hulls, weapons and AI numbers (`AiParams`) are defined in code, not in `assets/`. Provisional determinism fixture (SPAC-128), not the PD-28 combat rules. Phase 2 replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings, sections); that change bumps `SIM_VERSION`. Nothing in `assets/`, `st-game` or `apps/` uses it as content before Phase 2.
+
+| `physics-swarm`
+| ADR 0008 made permanent. 200 ships on a loose grid around (500 km, 0, 300 km), each one compound collider of three or four varied parts (boxes, balls and cylinders at offsets and rotations) with explicit mass properties, the planar `LockedAxes` of ADR 0007, continuous collision detection on every other ship, random thrust and yaw from `st-rng` as `Controls` commands of 200 external pilots, and 50 weapon sweeps (Parry shape casts) per tick. 7,200 ticks (60 s).
 
 | `solo-burn`
 | One ship near the origin and one scripted pilot: burn, turn, strafe and brake. 600 ticks (5 s).
@@ -130,7 +136,7 @@ A file that was cut short plays up to its last complete segment.
 `st_sim::SIM_VERSION` is bumped by any change that moves a pinned line of `reference.txt`, changes a command kind, its payload or encoding, the setup encoding, the `replay` container version, the `st-rng` algorithm, or the version of a simulation dependency in `Cargo.lock`.
 `tools/determinism/sim-version.txt` pins it, append-only.
 Each line is `<sim version> <FNV-1a 64 of the pinned lines> <FNV-1a 64 of the wire golden bytes>`.
-The pinned lines are the lines of `reference.txt` of every code-defined scenario (all of them except `data-fixtures`, whose content is data) and their `.replay` lines, joined with LF and no final LF; the ADR names `physics-swarm`, `math-kernels` and `combat-60s`, which do not exist yet, so the pin covers the scenarios that do.
+The pinned lines are the lines of `reference.txt` of `physics-swarm`, `math-kernels` and `combat-60s` and their `.replay` lines, joined with LF and no final LF. The other four scenarios are not pinned: `data-fixtures` because its content is data, and the three interim scenarios because they are not part of the replay contract. (Until SPAC-128 the pin covered every scenario except `data-fixtures`.)
 The wire golden bytes are `st_sim::command::wire::golden_bytes()`.
 The test `sim_version_pin` (`cargo test`, every platform) fails with the line to append when the simulation, the encoding or the reference changes without a new line; the fix is to bump `SIM_VERSION` and append that line.
 Review checks that a line was added and no earlier line was edited.
@@ -140,7 +146,8 @@ Review checks that a line was added and no earlier line was edited.
 === Tests
 
 In `st-sim`: wire round trips and golden bytes, varint edge cases (overlong, overflow), counts bounded by the bytes left, record and play of every scenario, canonical re-encoding, truncation at every byte offset of a small file, a flipped bit at every offset (corruption, never a desync), and 10,000 seeded random mutations of a valid file (a third with the chunk checks recomputed, so the decoders behind them are reached) that must each return an error or a valid log, never panic.
-In `tools/determinism`: `--replay`, `--force`, exit status 4, and status 3 winning over 4 (`tests/cli.rs`).
+In `tools/determinism`: `parry_bvh_log2_domain` (`tests/parry_log2.rs`, every platform) checks the accepted residual of ADR 0008: for every BVH leaf count from 1 to 1,048,576, the number of subtrees Parry derives from `log2` is the same with the platform `f64::log2` and with `libm::log2`; any difference fails the build. `snapshot_continuity` and the reference test cover every scenario, `physics-swarm` and `combat-60s` included.
+Also in `tools/determinism`: `--replay`, `--force`, exit status 4, and status 3 winning over 4 (`tests/cli.rs`).
 In `st-data`: the envelope writer loads back to the same value and content hash.
 
 == Run it on wasm32-wasip1
@@ -170,7 +177,7 @@ cargo run --release --locked -p determinism -- --out tools/determinism/reference
 git diff tools/determinism/reference.txt
 ----
 
-A change that moves a line of a code-defined scenario also needs a new `SIM_VERSION` (see <<_the_simulation_version_and_its_pin>>); the test `sim_version_pin` prints the line to append to `tools/determinism/sim-version.txt`.
+A change that moves a pinned line also needs a new `SIM_VERSION` (see <<_the_simulation_version_and_its_pin>>); the test `sim_version_pin` prints the line to append to `tools/determinism/sim-version.txt`.
 The reference is regenerated with the version bump in the same commit, because the pin hashes the reference.
 
 A hash that differs on one platform only is a determinism bug, not a reason to regenerate.
@@ -237,7 +244,7 @@ Download them from the run page to inspect a failure.
 
 The comparison is `tools/ci/determinism-compare.sh <artifacts-dir> <reference-file>`; run it on a directory laid out like the downloaded artifacts to try it locally.
 It exits 0 when all is equal, 1 on a mismatch or a missing or unexpected file.
-The checks also reject a vacuous pass: the reference and every output must be non-empty, end with a newline, and have a line for each scenario of the reference, which must have at least five (`MIN_SCENARIOS` in the script, to be raised when scenarios are added).
+The checks also reject a vacuous pass: the reference and every output must be non-empty, end with a newline, and have a line for each scenario of the reference, which must have at least twelve names (`MIN_SCENARIOS` in the script: the seven scenarios and the five `.replay` lines; raise it by hand when scenarios are added).
 An artifact directory with any file besides its own is rejected too.
 
 A mismatch report looks like this (an illustration: the `wasm32` hash is the reference hash with its last character altered by hand):

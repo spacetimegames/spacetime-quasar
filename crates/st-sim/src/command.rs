@@ -28,9 +28,9 @@ impl PilotId {
 pub struct ControlState {
     /// Positive forward, negative brake.
     pub thrust: i16,
-    /// Positive to the right of the heading.
+    /// Positive to the right of the heading (local -X).
     pub strafe: i16,
-    /// Positive turns counter-clockwise (toward +y from +x).
+    /// Positive turns counter-clockwise seen from +Y (from +Z toward +X).
     pub turn: i16,
     /// Combat-mode heading as a binary angle (2^32 units per turn), if any.
     pub aim: Option<u32>,
