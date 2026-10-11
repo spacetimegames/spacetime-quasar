@@ -29,7 +29,7 @@ cargo test --workspace
 These three commands were run by an agent inside `nix develop` on the reference dev machine and passed (no tag).
 `cargo deny check` and the MSRV job are also required, but are not wired up yet and have not been run.
 The determinism harness runs in the test and `wasm32` jobs, which upload its output, and the `determinism` job compares the four outputs with each other and with the committed reference (xref:62-determinism-harness.adoc[Determinism harness]).
-`determinism` joins the nine required checks (`fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs`, `nix`) once it has run green on `main` (xref:adr/0003-ci-design.adoc[ADR 0003]); until then it is not required for merging.
+`determinism` is the tenth required check, next to the nine others (`fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs`, `nix`), after its first green run on `main` (xref:adr/0003-ci-design.adoc[ADR 0003]).
 From Phase 2, renderer checks run on lavapipe with golden images; updating a golden needs Reviewer approval.
 
 CI enforcement is defined by xref:adr/0003-ci-design.adoc[ADR 0003] and is being set up in Phase 0; do not assume it runs today.
