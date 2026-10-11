@@ -44,7 +44,7 @@ All of this is on `main`.
 * `st-time`: fixed-step clock and frame-budget statistics (PR #20).
 * `st-data` core: versioned RON envelope, migrations, canonical BLAKE3 hashes and diagnostics (PR #19).
 * `st-platform` core: filesystem, clock, and a hot-reload watcher behind a feature (PR #21).
-* `st-math` core: deterministic scalar math (`st_math::det`), the render origin and the clippy determinism rules (PR #25).
+* `st-math`: deterministic scalar math (`det`) and the camera-relative render origin (PR #25); from SPAC-123, Kepler orbits for on-rails bodies (elliptic only, fixed-iteration solver) and `f64` interpolation (lerp, nlerp, slerp, Hermite), with bit-pattern golden tests.
 * `st-sim` (minimal): commands, fixed step, state hash and three scenarios, plus the `determinism` harness in `tools/determinism` (PR #26; xref:../62-determinism-harness.adoc[how to run it]).
 * The flake keeps `.ron` data files in its source filter (PR #22).
 * Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0010, the product decision records PD-01 to PD-34, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
