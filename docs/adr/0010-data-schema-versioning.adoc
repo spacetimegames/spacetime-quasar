@@ -1,0 +1,795 @@
+= ADR 0010: Data schema versioning, migration, content hashing and hot reload
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted
+
+== Date
+
+2026-10-11
+
+== Context
+
+`st-data` is still a stub. This ADR fixes its file format contract before any
+code exists, because ship designs, saves and every `+assets/**/*.ron+` file
+will depend on it.
+
+The charter binds this decision:
+
+* "`st-data`: `.ron` loading, schema versioning, hot reload in dev builds,
+  validation with actionable errors."
+* "Never hardcode what should be a value." Ship designs and sections,
+  weapons, economy tables, inventories, outfitter items, faction standings,
+  design grammars and system layouts live in `+assets/**/*.ron+` and load
+  without a rebuild. AI, economy, faction and mission logic read data files,
+  never consts.
+* "Ship designs are versioned, content-hashed files validated by rules in
+  `st-sim`; players can share them as files"
+  (xref:../decisions/pd-04-multiplayer-is-not-supported.adoc[PD-04],
+  xref:../decisions/pd-03-ship-progression.adoc[PD-03]). A design shared by
+  another player is untrusted input.
+* "Save/load: versioned, forward-compatible; universe state separate from
+  pilot state." The save format gets its own ADR in Phase 3; it reuses the
+  mechanism fixed here.
+* Reusable crates are "designed as if publishable": no game types in public
+  signatures, no panics on misuse. The workspace denies `unsafe_code`.
+* Browser-ready (xref:../decisions/pd-11-browser-target.adoc[PD-11]): core
+  crates use threads and the file system only through `st-platform`, and
+  content loading is async-capable. Hot reload is dev-only and native-only.
+* Determinism (xref:../decisions/pd-06-determinism.adoc[PD-06]): the
+  simulation is bit-identical across platforms, so data loaded into it must
+  parse to the same bits everywhere, and no data structure may leak an
+  unspecified iteration order into the simulation.
+* Phase 1 runnable demo: "a CLI demo where editing a `.ron` value
+  hot-reloads and prints the validated values plus a deterministic replay
+  hash."
+* Dependencies follow xref:0002-dependency-policy.adoc[ADR 0002]. `serde`
+  with `ron` is a preferred crate pair; serialisation formats need an ADR.
+
+ADRs 0006 (math boundary), 0007 (large-world coordinates) and 0008
+(determinism) are written in parallel; ADR 0009 (command log and replay
+format) comes later. This ADR does not depend on their outcomes. The
+interfaces it offers to them and needs from them are listed in
+<<interfaces>>.
+
+=== Facts verified on 2026-10-11
+
+Versions, licences and `rust-version` values were read from the crates.io
+API. Library behaviour was checked in a scratch crate (not committed) built
+with the pinned Rust 1.99.0 from the repository's dev shell, and in the
+crate sources.
+
+[cols="2,2,3,1",options="header"]
+|===
+| Crate | Latest stable | Licence | `rust-version`
+
+| `serde`, `serde_derive`
+| 1.0.229 (2026-07-18)
+| `MIT OR Apache-2.0`
+| 1.56, 1.71
+
+| `ron`
+| 0.12.2 (2026-06-22)
+| `MIT OR Apache-2.0`
+| 1.64.0
+
+| `serde_path_to_error`
+| 0.1.20 (2025-09-15)
+| `MIT OR Apache-2.0`
+| 1.61
+
+| `serde_ignored`
+| 0.1.14 (2025-09-14)
+| `MIT OR Apache-2.0`
+| 1.61
+
+| `blake3`
+| 1.8.7 (2026-08-20)
+| `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception`
+| not declared
+
+| `sha2` (alternative)
+| 0.11.0 (2026-03-25)
+| `MIT OR Apache-2.0`
+| 1.85
+
+| `notify` (alternative)
+| 8.2.0; 9.0.0 is at `rc.5`
+| `CC0-1.0`
+| 1.88 (9.0 rc)
+|===
+
+* *ron 0.12.2 source.* A typed `f32` or `f64` field is parsed with
+  `<f32 as FromStr>` or `<f64 as FromStr>` directly (`src/parse.rs`,
+  `impl_float!`). `deserialize_any` instead guesses: it yields `f32` when
+  the value round-trips through `f32`, else `f64` (`ParsedFloat::parse`).
+  `Deserializer::span_error` and `Deserializer::remainder` are public, so a
+  caller can attach the cursor position to any error after deserialisation
+  returns. `Options` defaults to a recursion limit of 128 and has
+  `with_default_extension` and `with_recursion_limit`.
+* *Errors with path and position.* Wrapping `&mut ron::Deserializer` in
+  `serde_path_to_error` and then calling `span_error` gives both, for
+  example:
+** unknown field: `7:9-7:12`, path `data.mas`, "Unexpected field named
+   `mas` in `Design`, expected one of `name`, `mass`, `armor`, `sections`,
+   or `tags` instead" (needs `#[serde(deny_unknown_fields)]`);
+** out-of-range integer: `9:37-9:38`, path `data.sections[0].Cargo.capacity`;
+** unknown enum variant: `9:54-9:58`, path `data.sections[2]`, with the list
+   of expected variants;
+** missing field: position at the end of the struct, path `data`;
+** duplicate struct field: position of the second occurrence, path `data`;
+** syntax error (missing comma): `8:9`, reported by the header pass already.
+* *Silent cases.* `ron` accepts `NaN` and `inf` for float fields; the `f32`
+  literal `3.4028236e38` parses to `+inf` and `1e-46` to `0.0` without an
+  error. A `BTreeMap` field with a duplicate key (`{"a": 1, "a": 2}`) keeps
+  the last value without an error. An integer literal for a float field
+  (`mass: 12`) is accepted as `12.0`.
+* *`ron::Value` drops enum variant names.* `[Cargo(capacity: 1),
+  Engine(0.5), Core]` parses to `Seq([Map(..), Seq([..]), Unit])`, so
+  migrations written against `ron::Value` cannot see which variant a value
+  was.
+* *Struct names.* `ron` accepts a struct without a name, and checks a
+  written name against the Rust type name: `ShipDesignV3(kind: "a")` read
+  into a type named `Envelope` fails with `ExpectedDifferentStructName`.
+* *Header pass.* A struct `{ kind: String, version: u32, data: IgnoredAny }`
+  without `deny_unknown_fields` reads `kind` and `version` from any
+  well-formed file, including one with an unknown extra header field; the
+  strict pass then rejects that field with its position.
+* *Typed migration chain.* A trait with `const VERSION: u32`,
+  `type Previous` and `fn migrate(previous) -> Result<Self, _>`, a recursive
+  generic loader and an inline `const { assert!(..) }` on the version
+  sequence compiles and migrates a v1 value to v2. Wrapping the deserializer
+  in `serde_ignored` on top of `serde_path_to_error` reported `data.mas` for
+  an unknown field of a struct that lacks `deny_unknown_fields`.
+* *Cross-platform parsing.* The same binary built for
+  `x86_64-unknown-linux-gnu` and for `wasm32-wasip1` (run under wasmtime
+  49.0.2) printed identical output for all of the above, including these
+  bit patterns:
++
+[cols="2,2,3",options="header"]
+|===
+| Literal | `f32` bits | `f64` bits
+
+| `0.1` | `3dcccccd` | `3fb999999999999a`
+| `16777217` | `4b800000` | `4170000010000000`
+| `1.4e-45` | `00000001` | `369ff868bf4d956a`
+| `0.30000000000000004` | `3e99999a` | `3fd3333333333334`
+| `-0.0` | `80000000` | `8000000000000000`
+| `2.5e-324` | `00000000` | `0000000000000001`
+|===
+* *blake3 with `pure`.* The build script compiles no C or assembly when the
+  `pure` feature is on; on x86 targets it still probes the C compiler for
+  AVX-512 flags (`c_compiler_support` in `build.rs`) and then ignores the
+  result. Its build dependency `cc` is already in `Cargo.lock` through the
+  wgpu tree.
+* *Workspace trial (reverted, not committed).* Adding
+  `serde`, `ron`, `serde_path_to_error`, `serde_ignored` and `blake3` with the
+  features in <<dependencies>> to `crates/st-data` grew `Cargo.lock` from 268
+  to 276 packages (new: `blake3`, `constant_time_eq`, `cpufeatures`, `itoa`,
+  `ron`, `serde_ignored`, `serde_path_to_error`, `typeid`). With the
+  repository's `deny.toml`, `cargo deny check` reported
+  `advisories ok, bans ok, licenses ok, sources ok`;
+  `cargo check -p st-data --target wasm32-unknown-unknown` passed; and
+  `cargo build -p st-data --locked` passed with rustc 1.88.0 (the MSRV).
+* *Polling cost.* Walking a directory tree of 2000 small files and reading
+  each file's metadata (modification time and length) took 1.27 to 1.44 ms
+  per full pass in a release build on the development machine (Linux, warm
+  cache).
+
+=== Assumed, not verified
+
+* Float parsing gives the same bits on `x86_64-pc-windows-msvc` and
+  `aarch64-apple-darwin`. Rust's float parsing lives in `core` as portable
+  Rust code, so this is expected; the golden tests in <<testing>> verify it
+  in CI once `st-data` exists.
+* The canonical encoder and the span locator below are specified but not
+  prototyped.
+* A 200 ms quiet period and an incremental metadata sweep feel responsive
+  enough to designers; polling costs on Windows and macOS file systems are
+  of the same order as on Linux.
+
+== Decision
+
+=== Crate boundary
+
+* `st-data` is generic and does no I/O. Its loader takes a source name and
+  the file's bytes and returns either a typed value with its content hash or
+  a list of diagnostics. It has no file system access, no threads and no
+  game types; it compiles for all project targets including
+  `wasm32-unknown-unknown`. Async loading comes from the caller:
+  `st-platform` reads the bytes (asynchronously where the platform needs it)
+  and hands them over.
+* Schema types (the Rust structs that a kind deserialises into) live in the
+  crate that owns their meaning: ship designs and their validation rules in
+  `st-sim` (PD-03), and so on. `st-data` provides the traits, the loader,
+  the diagnostics, the canonical hash and the reload bookkeeping.
+* No input makes `st-data` panic. The loader rejects inputs larger than a
+  caller-supplied limit (default 16 MiB) before parsing, rejects bytes that
+  are not UTF-8, and parses with the `ron` recursion limit set explicitly to
+  128.
+
+=== Version record: an envelope around every file
+
+Every data file is a RON struct with exactly three fields, written without a
+struct name:
+
+[source,ron]
+----
+// assets/ships/shuttle.ron
+(
+    kind: "ship_design",
+    version: 3,
+    data: (
+        name: "Shuttle",
+        // ...
+    ),
+)
+----
+
+* `kind` names the schema family. It matches
+  `+[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*+`, is chosen by the owning crate and
+  never changes meaning; a kind that is restructured beyond migration gets a
+  new name.
+* `version` is a `u32`, starting at 1, increasing by exactly 1 per schema
+  change of that kind. Numbers are never reused, even after old versions are
+  dropped.
+* `data` is the payload, deserialised into the schema type of
+  (`kind`, `version`).
+* The loader enables the `ron` extension `implicit_some` by default, so an
+  `Option` field is written as a bare value or omitted (with
+  `#[serde(default)]`). A file may enable further extensions with
+  `#![enable(..)]`; the content hash does not depend on syntax.
+* Struct names are optional in the payload as in the envelope. `ron` accepts
+  an omitted name and rejects a written name that differs from the Rust type
+  name (verified). Tools that write RON omit names, and the hash ignores
+  them. A shipped file that writes a name makes renaming that Rust type a
+  schema change; the asset test catches it.
+* Loading takes two passes over the same bytes:
+. *Header pass* (lenient): deserialise
+  `{ kind: String, version: u32, data: IgnoredAny }`, ignoring unknown
+  header fields. Syntax errors surface here with their position. The loader
+  then checks `kind` and `version` before it knows the payload type, so a
+  file from a newer build always yields `version-too-new`, even if a later
+  ADR adds header fields. `wrong-kind` fires when the caller loads a known
+  type and the header names another kind; `unknown-kind` fires when the
+  data set dispatches by kind and no type is registered for it.
+. *Strict pass*: deserialise the envelope with the payload type for that
+  version, with `deny_unknown_fields` on the envelope and on every schema
+  type.
+* Several payloads that belong together (for example universe state and
+  pilot state in a save) are separate envelopes, each with its own kind and
+  version; how they are packaged is the save ADR's choice.
+
+=== Compatibility policy
+
+The policy is *upgrade-safe*: older files open in newer builds; older builds
+refuse newer files with a clear message. This is how this ADR reads the
+charter's "forward-compatible" saves: files keep working as the game moves
+forward, not that an older build reads a newer file. The policy awaits
+owner confirmation together with the save behaviour (G11, Phase 3) and can
+be revisited by a superseding ADR.
+
+Kinds fall into two classes. The class is a policy, documented in the
+owning crate next to the kind; it is not a runtime flag.
+
+Player-held kinds::
+  Files a player creates, keeps or receives: ship designs, saves, settings,
+  key bindings, and any future exported file. *Backward compatibility is
+  permanent:* once a version has been in a public build, every later build
+  reads it, through migrations. Before the first public build nothing has
+  been released, so these chains may still be shortened.
+Shipped kinds::
+  Content under `assets/`, which ships with the build that reads it. Every
+  file under `assets/` is at its kind's current version on `main`; a test
+  enforces it (<<testing>>). Migrations for shipped kinds are optional
+  tooling and may be deleted once the files are updated.
+
+For both classes:
+
+* *Backward* (a newer build reads an older file): supported for every
+  version that still has a migration path; an older version without one
+  yields `version-too-old`, naming the oldest supported version.
+* *Forward* (an older build reads a newer file): not supported. The build
+  refuses the file with `version-too-new`, naming the file's version and the
+  newest version it reads. It never reads a newer file partially, because
+  re-saving such a file would silently drop content. Whether this should
+  change is product question 1 below.
+* *Unknown fields* are always errors, with line and column, at every level
+  including the envelope. A typo such as `mas: 50` must never fall back to a
+  default.
+* *Missing fields* are errors unless the field has `#[serde(default)]`.
+* *Every schema change bumps the version*, additive ones included: adding,
+  removing, renaming or retyping a field or variant, or changing a default
+  or the meaning of a value. Rust-only edits (doc comments, the order of named fields,
+  `#[serde(rename)]` that keeps the RON name) are not schema changes. The
+  rule keeps the content hash of a given file stable within a version
+  (<<hashing>>), and it lets an older build refuse newer files by number
+  instead of failing on an unknown field.
+
+=== Rules for schema types
+
+Every type reachable from a payload follows these rules; the
+`docs/30-content-authoring.adoc` page will repeat them as a review checklist.
+
+* `#[derive(Serialize, Deserialize)]` and `#[serde(deny_unknown_fields)]` on
+  every struct and enum. No hand-written `Serialize` or `Deserialize` impls
+  and no `with`, `serialize_with` or `deserialize_with`, except helpers that
+  `st-data` provides.
+* Forbidden serde attributes: `flatten`, `untagged`, `tag`, `content`,
+  `skip`, `skip_serializing`, `skip_serializing_if`. The first four buffer
+  through serde's internal content type, where `ron` loses error positions
+  and parses floats through the `deserialize_any` guess instead of the typed
+  path. The skip attributes would hide fields from the content hash.
+  `#[serde(default)]` is allowed: the default value is serialised and
+  hashed like any other.
+* Maps use `st_data::UniqueMap<K, V>`, a `BTreeMap` wrapper whose
+  deserialiser rejects a duplicate key with `duplicate-key` and its
+  position. `HashMap`, `HashSet` and other containers with unspecified
+  iteration order are not allowed in schema types. Sets are written as lists;
+  uniqueness is a validation rule.
+* Floats are `f32` or `f64` and must be finite; NaN and infinities are
+  rejected at load by the canonical encoder (`non-finite`). `-0.0` is kept
+  as written.
+* No `i128` or `u128` (the `ron` feature `integer128` is off). The
+  canonical encoder rejects them with a `type` diagnostic, so a schema type
+  that uses them fails on its first load and in its golden test.
+* The loader is a backstop for the first rule: it wraps the deserialiser in
+  `serde_ignored`, and any field that was ignored anyway (a type missing
+  `deny_unknown_fields`) is an error `schema-not-strict` with its path, so a
+  typo is still never silently dropped.
+
+=== Migrations: typed, chained, one step per version
+
+* Each supported version of a kind has its own Rust type. The current
+  version is the live type; every earlier supported version is a *frozen*
+  copy in its own module, next to the live type in the owning crate:
++
+----
+crates/st-sim/src/schema/ship_design/mod.rs   current version (live type)
+crates/st-sim/src/schema/ship_design/v1.rs    frozen
+crates/st-sim/src/schema/ship_design/v2.rs    frozen
+----
++
+A frozen module holds the complete type tree of its version (every struct
+and enum it reaches, except primitives, `std` types and `st-data` helpers),
+contains only data types and the `migrate` function into it, and is never
+edited after it is merged. Bumping a version means: copy the live types into
+`v<N>.rs`, change the live types, set `VERSION` to `N + 1`, and write
+`migrate` from `v<N>` to the live type.
+* `st-data` defines the trait (signatures are normative, names may be
+  refined in the implementing PR):
++
+[source,rust]
+----
+pub trait Schema: serde::Serialize + serde::de::DeserializeOwned + 'static {
+    /// The `kind` string of the envelope.
+    const KIND: &'static str;
+    /// The schema version this type represents, at least 1.
+    const VERSION: u32;
+    /// The type of version `VERSION - 1`, or `st_data::Genesis` for the
+    /// oldest supported version.
+    type Previous: Schema;
+    /// Converts a value of the previous version into this version.
+    fn migrate(previous: Self::Previous) -> Result<Self, MigrationError>;
+}
+----
++
+`Genesis` is an uninhabited type with `VERSION = 0`. The loader, given a
+file at version `v` and a target type `T`, deserialises `T` when
+`v == T::VERSION` and otherwise loads `T::Previous` recursively and calls
+`T::migrate`; it stops with `version-too-old` when it reaches `Genesis`. An
+inline `const` assertion checks
+`T::Previous::VERSION == 0 || T::Previous::VERSION + 1 == T::VERSION`; a
+unit test among the `st-data` test helpers checks that every type in a chain has
+the same `KIND`.
+* A migration is a pure function of the previous value. No I/O, clock, RNG,
+  other files, global state or `HashMap` iteration. It avoids float
+  arithmetic; where one is unavoidable it uses the deterministic math API of
+  ADR 0006. It may fail with a `MigrationError` carrying a message and the
+  path of the offending value. It never "fixes" balance or validity: a
+  migrated value is validated like a freshly authored one.
+* Changes that need other files (for example splitting one file into two)
+  are done once by a tool, not by a migration.
+* Migrations rewrite values, not text. A tool that writes migrated values
+  back to disk loses comments and formatting, so hand-authored assets under
+  `assets/` are updated by editing the text, and the asset test proves the
+  result.
+
+[[hashing]]
+=== Content hash
+
+* *Algorithm:* BLAKE3 (crate `blake3`) in key-derivation mode with the
+  context string `"st-data 2026-10-11 canonical content hash v1"`, 32-byte
+  output. Text form: `b3:` followed by 64 lowercase hex digits.
+* *What is hashed:* the canonical encoding (below) of the triple
+  (`kind`, current `version`, value after migration to the current version),
+  not the file's raw bytes. Whitespace, comments, field order in the file,
+  `Some(x)` versus `x` under `implicit_some`, and an omitted field versus its
+  default written out all give the same hash. A file at the current version
+  therefore hashes the same in every build whose schema for that kind is at
+  that version; an older file hashes as the value it migrates to.
+* *Not stored in the file.* A file cannot contain its own hash; the hash is
+  computed on every load. Persistent references between files use
+  author-chosen identifiers, not content hashes, because a hash changes when
+  the referenced kind's version changes. Content hashes serve integrity,
+  deduplication of shared designs (a server can recompute and compare,
+  PD-04) and the data-set identity used by replays.
+* *Stable only within a schema version.* After a version bump, the same
+  file migrates to a new value at a new version and gets a new hash. A hash
+  stored elsewhere, for example one a server recorded for a shared design,
+  then no longer matches. Whoever stores a content hash stores the kind's
+  version with it, and treats a mismatch at a different version as "re-hash
+  after migration", not as a changed or tampered design.
+* *Data-set hash:* `st-data` also hashes a set of loaded files, as BLAKE3
+  (same mode, context `"st-data 2026-10-11 data set hash v1"`) over the
+  canonical encoding of the list of (`kind`, source name, content hash),
+  sorted by source name. This is the value replays and determinism checks
+  refer to (<<interfaces>>).
+* *Canonical encoding v1*, implemented in `st-data` as a `serde::Serializer`
+  with no further dependency. Integers are little-endian; "len" is a `u64`
+  little-endian count.
++
+[cols="2,5",options="header"]
+|===
+| serde data model | Encoding
+
+| `bool` | one byte, `00` or `01`
+| `i8` to `i64`, `u8` to `u64` | two's complement or unsigned, 1, 2, 4 or 8 bytes
+| `f32`, `f64` | IEEE 754 bits, 4 or 8 bytes; NaN and infinities are an error (`non-finite`); `-0.0` kept
+| `char` | Unicode scalar value as `u32`
+| string | len in bytes, then UTF-8 bytes, no normalisation
+| bytes | len, then the bytes
+| `None` / `Some(v)` | `00` / `01` then `v`
+| unit, unit struct | nothing
+| newtype struct | the inner value
+| sequence | len, then each element in order
+| tuple, tuple struct | each element in order (arity is fixed by the type)
+| map | len, then each entry (key, value) sorted by the bytes of the encoded key; equal encoded keys are an error
+| struct | field count, then each field as (name as string, value), sorted by the bytes of the name
+| enum variant | variant name as string, then the payload as for unit, newtype, tuple or struct
+|===
++
+The hash input is: `kind` as string, `version` as `u32`, then the encoded
+payload. Struct fields and enum variants are identified by name, not by
+position, so reordering them in Rust source does not change any hash. If the
+encoding ever changes, it becomes v2 with a new context string; hashes of
+different encoding versions are never compared.
+
+=== Diagnostics: actionable, located errors
+
+* `st-data` returns `Diagnostic` values; none is printed by the library.
+  Each has:
+** `source`: the name the caller passed in. Names use `/` as the separator on
+   every platform. For assets it is the
+   repository-relative path (`assets/ships/shuttle.ron`); for player files it
+   is relative to the player data directory (`designs/my_hauler.ron`), so
+   logs and bug reports never contain absolute paths;
+** `span`: optional start and end, as 1-based line and 1-based column
+   counted in Unicode scalar values (the `ron` convention);
+** `path`: the location inside the payload, rendered like
+   `sections[2].mass` (the envelope's `data.` prefix is dropped; envelope
+   fields are rendered as `kind` and `version`);
+** `code`: a stable kebab-case string: `too-large`, `not-utf8`, `syntax`,
+   `type`, `unknown-field`, `missing-field`, `duplicate-field`,
+   `duplicate-key`, `unknown-variant`, `wrong-kind`, `unknown-kind`,
+   `version-too-new`, `version-too-old`, `schema-not-strict`,
+   `non-finite`, `migration`, `validation`, `outdated-asset`,
+   `missing-source`; the enum
+   behind it is `#[non_exhaustive]`;
+** `rule`: for `validation`, the rule identifier chosen by the owning crate
+   (for example `ship_design.mass_budget`);
+** `message` and optional `help` (expected fields or variants, the nearest
+   field name, the supported version range).
+* `Display` renders one line per diagnostic:
++
+----
+error[unknown-field]: assets/ships/shuttle.ron:7:9: sections[0]: unknown field `mas`; expected one of `name`, `mass`, `armor`
+----
+* *Where positions come from.* Parse-time errors take their span from
+  `ron` (`Deserializer::span_error` after `serde_path_to_error` returns) and
+  their path from `serde_path_to_error`. Errors raised after parsing
+  (`non-finite`, `migration`, `validation`) carry a path; `st-data` then
+  looks the path up with a small RON span locator: a tokenizer for the
+  syntax `ron` 0.12 accepts (comments including nested block comments,
+  strings, raw strings, chars, numbers, identifiers and the three bracket
+  kinds) that walks the path and returns the value's span. The locator is
+  best-effort: if it cannot resolve the path, the diagnostic keeps the path
+  without a span. For a migrated file, a path that only exists in the
+  current version is reported with a note naming the file's version.
+* Parsing stops at the first error (a `ron` limitation). Validation reports
+  every failed rule at once.
+
+=== Validation
+
+* `st-data` defines `trait Validate { fn validate(&self, v: &mut Validator); }`.
+  `Validator` scopes paths (`v.field("mass", ..)`, `v.index(i, ..)`,
+  `v.key(k, ..)`) and collects `validation` diagnostics with a rule
+  identifier. Rules live in the owning crate (design rules in `st-sim`).
+* A load succeeds only when header, strict parse, migration, canonical
+  encoding (non-finite check) and `validate` all pass. Then it returns the
+  value with its content hash.
+* Rules that span several files (a design that names a section kind defined
+  elsewhere) are checked by the owning crate over the whole data set, with
+  the same `Diagnostic` type.
+
+=== Hot reload
+
+* *Scope:* development builds on native targets. `st-platform` gets a cargo
+  feature `hot-reload`, off by default, that provides the file watcher on
+  non-wasm targets only (`cfg(not(target_arch = "wasm32"))`). The
+  application enables it through its own `hot-reload` feature for the
+  Phase 1 demo and local development; release packages, including the Nix
+  package, build without it. Nothing in `st-data` is feature-gated: reload
+  bookkeeping is ordinary code that takes bytes.
+* *Watcher:* polling, no dependency and no thread. `st-platform` exposes a
+  watcher that the main loop calls once per frame. Each call reads metadata
+  for at most 256 entries of the watched roots, round-robin, and lists
+  directories to notice added and removed files. Directory listings count
+  toward the same 256-entry budget, so the listing is also sliced across
+  frames and no call walks a whole tree. A change is a different
+  modification time or length. Changes are released as one batch once no
+  further change has been seen for 200 ms, which absorbs editors that write
+  a temporary file and rename it, and "save all". At the measured cost this
+  is under 0.2 ms per frame for a full sweep of 2000 files spread over 8
+  frames.
+* *Loading a batch:* `st-platform` reads the changed files and the
+  application passes (source name, bytes) pairs to the `st-data` data set.
+  The data set loads every file in the batch, then runs the owning crates'
+  cross-file checks over the resulting set. The batch is all-or-nothing: if
+  any file or check fails, no value changes, the previous values stay in
+  use, and the diagnostics are returned. A file whose new content hash
+  equals the old one is not reported as changed. A removed file is a
+  `missing-source` diagnostic and keeps its last value until restart.
+* *Notifying consumers:* pull, not callbacks. The data set holds values as
+  `Arc<T>` snapshots, has a `generation: u64` counter that increases on every
+  accepted batch, and keeps a list of reload events (source, kind, old
+  hash, new hash) that the application drains once per frame. Consumers
+  compare the generation or read the events at a point of their choosing;
+  no value changes under them while they run.
+* *The simulation never sees data change inside a tick.* How reloaded data
+  reaches a running simulation is decided with the command log in ADR 0009
+  (<<interfaces>>). The Phase 1 demo needs no live patching: on each accepted
+  batch it prints the validated values and re-runs its replay from the seed
+  with the new data set, printing the new replay hash.
+
+[[testing]]
+=== Testing
+
+* *Fixtures per version:* every supported version of a player-held kind has
+  fixtures under `crates/<owner>/tests/data/<kind>/v<N>/<case>.ron`. They
+  are immutable once merged. Each has a sibling `<case>.expected.ron`
+  holding the canonical RON text of the value after migration to the current
+  version; a test loads every fixture through the chain and compares. When
+  the current version changes, `cargo xtask data bless` regenerates the
+  expected files and the reviewer reads the diff.
+* *Unit tests per migration step* for edge cases (empty lists, boundary
+  values, values that must fail).
+* *Golden content hashes:* each kind's current-version fixtures have their
+  `b3:` hashes recorded in the test. They catch a schema change made without
+  a version bump and any drift in the canonical encoding, and they run on
+  every platform in CI (Linux, Windows, macOS tests; `wasm32-wasip1` through
+  the Phase 1 determinism harness).
+* *Float-bit golden test:* a dedicated `st-data` test parses a fixed list
+  of literals (at least those in the verified table, plus subnormals, values
+  near `f32::MAX` and `f64::MAX`, and integer literals) into `f32` and `f64`
+  and compares the bit patterns with recorded constants. It runs on all four
+  CI targets: the three native `test` jobs and `wasm32-wasip1` under
+  wasmtime, which the `wasm32` job gains together with the Phase 1
+  determinism harness.
+* *Asset test:* an integration test in the crate that wires content
+  (`st-game`) loads every `+assets/**/*.ron+` file, requires its kind's current
+  version (`outdated-asset` otherwise), runs validation and cross-file checks,
+  and fails with all diagnostics.
+* *Untrusted input:* `st-data` has tests that feed truncated, oversized,
+  deeply nested and non-UTF-8 inputs and expect diagnostics, never a panic.
+
+[[dependencies]]
+=== Dependencies
+
+Admitted by this ADR for `st-data` (owning crates also take `serde` with
+`derive` for their schema types). The rows go into the register of
+xref:0002-dependency-policy.adoc[ADR 0002] in the PR that adds them, citing
+this ADR.
+
+[cols="2,2,3,4",options="header"]
+|===
+| Crate | Requirement | Features | Why
+
+| `serde`
+| `1.0.229`
+| `default-features = false`, `["std", "derive"]`
+| Data model and derives for schema types.
+
+| `ron`
+| `0.12.2`
+| `default-features = false`, `["std"]` (no `indexmap`, no `integer128`)
+| The charter's data format; positions on errors.
+
+| `serde_path_to_error`
+| `0.1.20`
+| none
+| Path of the failing value for every parse error.
+
+| `serde_ignored`
+| `0.1.14`
+| none
+| Backstop that turns silently ignored fields into `schema-not-strict`.
+
+| `blake3`
+| `1.8.7`
+| `default-features = false`, `["pure"]`
+| Content hash. `pure` keeps C and assembly out of the build on every
+  target; the hash is small-input and speed does not matter.
+|===
+
+All five are under `MIT OR Apache-2.0` except `blake3`
+(`CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception`), which is
+admitted through its `Apache-2.0` alternative (patent grant); all pass the
+current `deny.toml`. `serde_path_to_error` and `serde_ignored` have had no
+release in the last 12 months (last 2025-09-15 and 2025-09-14); they are
+admitted as demonstrably finished under ADR 0002: each is a small
+single-purpose adapter over serde 1.x's stable `Deserializer` trait, owned
+by serde's maintainer. Together they add 8 packages to `Cargo.lock`. `blake3`
+builds no native code with `pure`, so the "links native code" admission
+criterion of ADR 0002 does not apply; it is covered here anyway because of
+the build script. `st-platform` gains no dependency.
+
+[[interfaces]]
+=== Interfaces to ADRs 0006 to 0009 and the save ADR
+
+This ADR works whatever those ADRs decide. It offers and needs the
+following.
+
+ADR 0006, math boundary::
+  Offers: `f32` and `f64` parse to the correctly rounded value of the
+  literal through the `FromStr` implementation in `core`, whichever
+  precision 0006 chooses for simulation state. Identical bits are verified
+  on Linux x86_64 and wasm32 only; Windows and macOS are assumed until the
+  float-bit golden test (<<testing>>) passes in CI. Needs: math types that appear in data
+  files (vectors, angles, quantities) derive `Serialize` and `Deserialize`
+  under the rules for schema types, as plain RON structs or tuples. Any
+  migration that must do float arithmetic calls 0006's deterministic
+  functions.
+ADR 0007, large-world coordinates::
+  Offers: integers of up to 64 bits and finite floats, both exact and
+  hashed bit for bit. Needs: the coordinate types used in system layouts and
+  saves follow the rules for schema types. If 0007 picks fixed-point or
+  sector-plus-offset coordinates, their RON form is integers, which avoids
+  float parsing entirely.
+ADR 0008, determinism::
+  Offers: deterministic parsing, the canonical content hash and the
+  data-set hash; no `HashMap` iteration order reaches consumers through
+  schema types. Needs: the cross-platform determinism harness loads the
+  `st-data` golden fixtures and includes the data-set hash in what it
+  compares, on all four targets including `wasm32-wasip1`.
+ADR 0009, command log and replay::
+  Offers: the data-set hash, to be recorded in a replay's header so a replay
+  names the exact data it ran on; and the envelope plus `Schema` chain, which
+  0009 may reuse for its file format (or, if it chooses a binary format, it
+  should still carry a `kind` and a `version`). Needs: if 0009 allows data to
+  change during a recorded session (hot reload in a dev session), the change
+  enters the simulation only through the command path, as an entry that
+  names the new data-set hash at a tick boundary. Otherwise a reload restarts
+  the simulation.
+Phase 3 save ADR::
+  Reuses the envelope, the compatibility policy for player-held kinds, the
+  `Schema` migration chain, the diagnostics and the content hash. Universe
+  state and pilot state are separate kinds. It decides packaging, file
+  names, compression and whether the simulation state inside a save is RON
+  or a binary format with the same header.
+
+== Alternatives considered
+
+Version as an ordinary field inside the payload::
+  For example `(schema_version: 3, name: ..)`. Every payload type would
+  carry the field, and the loader could not read it without knowing the
+  type, which it cannot know before reading the version. The envelope keeps
+  versioning generic and payload types clean.
+Version in the file name or in a directory manifest::
+  Lost or wrong as soon as a player renames or shares a single file.
+Version in the RON struct name (`ShipDesignV3(..)`)::
+  `ron` checks a written struct name against the Rust type name
+  (`ExpectedDifferentStructName`, verified), which ties files to Rust
+  identifiers.
+`major.minor` versions with lenient reading of newer minors::
+  Needs unknown fields to be ignored, which turns typos into silent defaults
+  and lets an older build drop content on re-save. With forward reading
+  ruled out, a single integer is enough.
+Untyped migrations on `ron::Value`::
+  No frozen types to keep, but `ron::Value` drops enum variant names
+  (verified) and all positions. Ship designs are enum-heavy (section kinds).
+Text-level migrations (regular expressions over the file)::
+  Keep comments, but are fragile and cannot express structural changes
+  reliably.
+Evolution through `#[serde(default)]` and `#[serde(alias)]` only, no version::
+  Cannot express restructuring or renamed variants, gives older builds no
+  way to refuse newer files, and changes content hashes of unchanged files
+  when a defaulted field is added.
+Hash the raw file bytes::
+  Reformatting or a comment would change a design's identity.
+Hash the text that `ron` re-serialises::
+  The output formatting of `ron` is not a stable contract across releases, so a
+  dependency update could change every hash.
+`postcard` or `bincode` as the canonical form::
+  Field order and variant index dependent, and maps come out in iteration
+  order; reordering a Rust struct would change hashes.
+SHA-256 (`sha2` 0.11.0)::
+  Equally sound and pure Rust. Its main advantage, checking with external
+  tools, does not apply because the input is the canonical encoding, not the
+  file. BLAKE3 offers a built-in key-derivation mode for domain separation
+  and is a single crate.
+A non-cryptographic hash (xxHash, FxHash)::
+  Faster, but shared designs come from other players, and a future server
+  (PD-04) must not accept two different designs with one hash.
+`notify` 8.2.0 for file watching::
+  Event-driven and lower latency, but it needs a background thread and
+  channel, a debouncer, and per-platform backends (inotify, FSEvents or
+  kqueue, `ReadDirectoryChangesW`) with about ten more crates. Polling is
+  enough at asset scale and keeps `st-platform` dependency-free; the
+  watcher API allows swapping later.
+Callbacks for reload notification::
+  Re-entrancy into consumers at arbitrary points, and ordering problems
+  across consumers. A generation counter and drained events fit the
+  non-blocking main loop.
+`miette`, `codespan-reporting` or `ariadne` for diagnostics::
+  Rendering is a presentation concern of the application and tools;
+  `Diagnostic` carries the data any of them needs, and one can be chosen
+  later without touching `st-data`.
+`serde-reflection` to detect schema changes without a version bump::
+  Precise, but another dependency; golden content hashes over complete
+  fixtures catch the same mistake.
+Rely on `#[serde(deny_unknown_fields)]` alone::
+  Positions are better, but a single forgotten attribute brings back silent
+  typos; the `serde_ignored` backstop costs one small crate.
+
+== Consequences
+
+* Every data file, from a weapon table to a shared ship design, has the same
+  envelope, the same diagnostics and the same hash, and `st-data` stays
+  free of game types and I/O.
+* Older builds refuse newer files clearly instead of misreading them.
+* Each schema change of a player-held kind costs a frozen copy of the
+  affected types, a migration, fixtures and a version bump. Before the first
+  public build the chains may be squashed; afterwards they grow for good.
+* Hand-authored assets cannot be rewritten mechanically without losing
+  comments; version bumps of shipped kinds are text edits checked by the
+  asset test.
+* `docs/30-content-authoring.adoc` must carry the schema-type rules and the
+  version-bump procedure when the first kind lands.
+* Follow-up work (to be filed): the `st-data` core (envelope, `Schema`,
+  loader, `UniqueMap`, diagnostics, canonical encoder, hashes, data set);
+  the span locator; the `st-platform` polling watcher behind `hot-reload`;
+  `cargo xtask data bless`; the asset test once `assets/` exists; register
+  rows in ADR 0002 with the implementing PR.
+* Revisit if the answer to product question 1 is yes; if `assets/` grows
+  past about 10 000 files or polling latency bothers designers (switch the
+  watcher to `notify`); if `ron` changes its float or error-position
+  behaviour; or if the canonical encoding needs a v2.
+
+=== Product questions (not decided here)
+
+. Should an older game build open a save or ship design written by a newer
+  build? This ADR refuses such files. Allowing it needs a lossy-read
+  policy and a header field for the oldest compatible reader, and a decision
+  on what happens when the older build re-saves the file.
+. When a shared or old ship design parses but fails the current design
+  rules (for example after a balance change), may the player still open it
+  in the shipyard to repair it, or is it rejected outright? Migrations never
+  adjust balance; this ADR only guarantees the diagnostics.
+
+== References
+
+* Charter rules quoted in Context; PD-03, PD-04, PD-06, PD-11 in
+  `docs/decisions/`.
+* `ron` 0.12.2: https://docs.rs/ron/0.12.2/ron/
+* `serde` attributes: https://serde.rs/attributes.html
+* `serde_path_to_error`: https://docs.rs/serde_path_to_error/0.1.20/
+* `serde_ignored`: https://docs.rs/serde_ignored/0.1.14/
+* BLAKE3 specification and key derivation: https://github.com/BLAKE3-team/BLAKE3-specs
+* `blake3` 1.8.7: https://docs.rs/blake3/1.8.7/blake3/
+* xref:0002-dependency-policy.adoc[ADR 0002],
+  xref:0003-ci-design.adoc[ADR 0003]
+* Jira: SPAC-107

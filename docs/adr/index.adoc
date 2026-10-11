@@ -32,4 +32,9 @@ in the same commit.
 | Present the Phase 0 window through wgpu
 | Accepted
 | 2026-10-10
+
+| xref:0010-data-schema-versioning.adoc[0010]
+| Data schema versioning, migration, content hashing and hot reload
+| Accepted
+| 2026-10-11
 |===
