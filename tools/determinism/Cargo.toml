@@ -1,0 +1,13 @@
+[package]
+name = "determinism"
+description = "Determinism harness: runs the st-sim scenarios and prints their state hashes."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+st-sim = { path = "../../crates/st-sim" }
+
+[lints]
+workspace = true

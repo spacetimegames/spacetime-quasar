@@ -69,6 +69,8 @@
               || builtins.elem (baseNameOf path) [
                 "deny.toml"
                 "rustfmt.toml"
+                # Expected determinism-harness output, read with `include_str!`.
+                "reference.txt"
               ];
             name = "source";
           };
@@ -239,11 +241,16 @@
                 rustToolchain
                 pkgs.sccache
                 pkgs.cargo-deny
+                # Runs the wasm32-wasip1 tests and the determinism harness (ADR 0008).
+                pkgs.wasmtime
               ]
               ++ lib.optionals stdenv.hostPlatform.isLinux [ pkgs.mold ];
 
               RUSTC_WRAPPER = "sccache";
               SCCACHE_CACHE_SIZE = "20G";
+              # `cargo test --target wasm32-wasip1` runs through wasmtime; the
+              # current directory is the only directory the module may open.
+              CARGO_TARGET_WASM32_WASIP1_RUNNER = "wasmtime run --dir=.";
             }
             // lib.optionalAttrs stdenv.hostPlatform.isLinux {
               # Target-specific, so config-file rustflags are joined, not replaced

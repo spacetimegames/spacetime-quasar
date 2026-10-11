@@ -59,6 +59,11 @@ Pages marked "stub" exist only to fix their scope; each states its own status.
 | xref:45-art-bible.adoc[Art bible]
 | stub
 | Phase 4
+
+| 11
+| xref:62-determinism-harness.adoc[Determinism harness]
+| written (minimal)
+| Phase 1
 |===
 
 == Platforms

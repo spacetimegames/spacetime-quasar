@@ -4,10 +4,11 @@
 # names from a matrix expression and never add path filters.
 #
 # Not yet implemented (later phases, added together with their harness):
-#   - `determinism` (Phase 1): each test/wasm32 job runs the determinism
-#     harness and uploads `determinism-<platform>`; a compare job needs all
-#     four producers and runs with `if: ${{ !cancelled() }}`. Wasmtime is
-#     installed with taiki-e/install-action for wasm32-wasip1.
+#   - `determinism` compare job (Phase 1): the four producers (the test and
+#     wasm32 jobs) already diff the harness output against
+#     tools/determinism/reference.txt; the compare job needs them to upload
+#     `determinism-<platform>` and then compare the four files. It runs with
+#     `if: ${{ !cancelled() }}`.
 #   - `render (lavapipe)` (Phase 2): renderer golden-image tests via
 #     `nix develop -c env -u RUSTC_WRAPPER
 #     -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS cargo test ...`
@@ -54,6 +55,10 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: cargo bench --workspace --no-run --locked
+      - name: Determinism harness
+        run: |
+          cargo run --release --locked -p determinism -- --out determinism-linux-x86_64.txt
+          diff -u tools/determinism/reference.txt determinism-linux-x86_64.txt
 
   test-windows:
     name: test (windows-x86_64)
@@ -68,6 +73,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Determinism harness
+        shell: bash
+        run: |
+          cargo run --release --locked -p determinism -- --out determinism-windows-x86_64.txt
+          diff -u tools/determinism/reference.txt determinism-windows-x86_64.txt
 
   test-macos:
     name: test (macos-aarch64)
@@ -82,6 +92,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Determinism harness
+        run: |
+          cargo run --release --locked -p determinism -- --out determinism-macos-aarch64.txt
+          diff -u tools/determinism/reference.txt determinism-macos-aarch64.txt
 
   wasm32:
     name: wasm32
@@ -96,6 +110,21 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --target wasm32-unknown-unknown --locked -- -D warnings
       - run: cargo build --workspace --target wasm32-unknown-unknown --locked
+      # ADR 0003, ADR 0008: the golden tests and the determinism harness run on
+      # wasm32-wasip1 under wasmtime (the version nixpkgs pins).
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: wasmtime@49.0.2
+      - name: Tests on wasm32-wasip1
+        run: cargo test --locked --target wasm32-wasip1 -p st-math -p st-rng -p st-time -p st-sim -p st-data -p determinism
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime run --dir=.
+      - name: Determinism harness on wasm32-wasip1
+        run: |
+          cargo run --release --locked --target wasm32-wasip1 -p determinism -- --out determinism-wasm32.txt
+          diff -u tools/determinism/reference.txt determinism-wasm32.txt
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime run --dir=.
 
   msrv:
     name: msrv
