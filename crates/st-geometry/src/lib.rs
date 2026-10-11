@@ -5,3 +5,9 @@
 //! Boundary: this crate is a stub; it has no public API yet.
 //!
 //! Non-goals: Does not upload to the GPU, does not shade, and does not own the design data itself.
+
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "exempt from PD-06: ADR 0008"
+)]

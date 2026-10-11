@@ -9,6 +9,12 @@
 //!
 //! Non-goals: No CPU rendering path, no simulation state, and no game-specific types in public signatures.
 
+#![allow(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "exempt from PD-06: ADR 0008"
+)]
+
 use std::fmt;
 
 /// The constant clear colour of the Phase 0 window (a dark blue-grey).
