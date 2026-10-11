@@ -11,7 +11,9 @@ is the short version. Where a rule has an ADR, the ADR wins.
 
 - [docs/index.adoc](docs/index.adoc): map of all documentation.
 - [docs/adr/index.adoc](docs/adr/index.adoc): binding ADRs. 0001 toolchain/MSRV/Nix,
-  0002 dependencies, 0003 CI, 0004 build resources for parallel Builders, 0005 Phase 0 window presentation.
+  0002 dependencies, 0003 CI, 0004 build resources for parallel Builders, 0005 Phase 0 window presentation,
+  0006 math types (glam), 0007 world coordinates (f64 sim, f32 render), 0008 determinism,
+  0010 data schema versioning.
 - [docs/decisions/index.adoc](docs/decisions/index.adoc): product decisions of record (PD-xx).
 - [docs/60-contributing.adoc](docs/60-contributing.adoc): git flow, Definition of Done,
   verification tags, PR conventions, docs rules.
@@ -43,7 +45,7 @@ propose a superseding ADR instead.
   wasm32-unknown-unknown. Native-only code is `cfg`-gated inside `st-platform` and `apps/`.
 - Determinism: the sim is bit-identical across platforms (state hash in CI; renderer
   exempt). Software libm in sim math, no implicit FMA, no unordered parallel or SIMD
-  reductions in sim code.
+  reductions in sim code. Sim-crate list, clippy rules and physics rules: ADR 0008.
 - Multiplayer-ready, no netcode: the player is not special (N pilots fed by input
   sources); the sim advances only through commands (seed + per-tick command log);
   `st-sim` stays headless; saves separate universe state from pilot state.

@@ -33,6 +33,21 @@ in the same commit.
 | Accepted
 | 2026-10-10
 
+| xref:0006-math-library-boundary.adoc[0006]
+| Math library boundary: glam everywhere, nalgebra only inside Rapier
+| Accepted
+| 2026-10-11
+
+| xref:0007-large-world-coordinates.adoc[0007]
+| Large-world coordinates: f64 simulation, f32 camera-relative rendering
+| Accepted
+| 2026-10-11
+
+| xref:0008-determinism-implementation.adoc[0008]
+| Determinism implementation
+| Accepted
+| 2026-10-11
+
 | xref:0010-data-schema-versioning.adoc[0010]
 | Data schema versioning, migration, content hashing and hot reload
 | Accepted

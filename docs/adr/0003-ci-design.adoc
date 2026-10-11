@@ -5,7 +5,11 @@ toc::[]
 
 == Status
 
-Accepted
+Accepted. The `msrv` job toolchain (1.88.0) is amended by
+xref:0007-large-world-coordinates.adoc[ADR 0007]: it becomes 1.89.0 in the PR
+that adds `rapier3d-f64`. The Phase 1 harness details this ADR leaves open
+(including the reference-file path) are set by
+xref:0008-determinism-implementation.adoc[ADR 0008].
 
 == Date
 
