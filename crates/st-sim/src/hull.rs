@@ -13,6 +13,11 @@ use st_math::eigen::symmetric_eigen3;
 use st_math::glam::{DMat3, DQuat, DVec3};
 
 /// The most parts one hull may have.
+///
+/// ```
+/// use st_sim::{MAX_HULL_PARTS, ShipInit};
+/// assert!(ShipInit::default().hull.len() <= MAX_HULL_PARTS);
+/// ```
 pub const MAX_HULL_PARTS: usize = 16;
 
 /// The convex shape of one hull part, in the part's own frame.
@@ -42,7 +47,7 @@ pub enum PartShape {
 ///
 /// ```
 /// use st_math::glam::{DQuat, DVec3};
-/// use st_sim::{HullPart, PartShape, ShipInit, Sim, Setup};
+/// use st_sim::{AiParams, HullPart, PartShape, ShipInit, Sim, Setup};
 ///
 /// // A ship made of a box and a ball: the simulation computes mass, centre of mass and
 /// // principal inertia from the parts and builds one compound collider.
@@ -65,6 +70,8 @@ pub enum PartShape {
 ///     pilots: Vec::new(),
 ///     ai_pilots: Vec::new(),
 ///     gravity_mu: 0.0,
+///     max_speed_mps: 20_000.0,
+///     ai: AiParams { turn_gain: 3.0, fire_cone: 0.05, standoff: 0.5, unarmed_standoff: 100.0, drift_ticks: 240 },
 /// };
 /// assert!(Sim::new(&setup, 0).is_ok());
 /// ```
@@ -82,6 +89,10 @@ pub struct HullPart {
 
 /// A weapon: an instant sweep of a ball along the ship's heading.
 ///
+/// **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+/// replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+/// sections); that change bumps `SIM_VERSION`.
+///
 /// While the pilot holds the primary button (bit 0 of [`ControlState::buttons`](crate::ControlState)),
 /// the weapon fires whenever it is ready: it sweeps a ball of `radius` metres from the
 /// ship's centre along its heading for `range` metres, and the first other ship it touches loses
@@ -89,7 +100,7 @@ pub struct HullPart {
 ///
 /// ```
 /// use st_math::glam::DVec3;
-/// use st_sim::{Command, CommandKind, ControlState, FIRE, PilotId, Setup, ShipInit, Sim, Weapon};
+/// use st_sim::{AiParams, Command, CommandKind, ControlState, FIRE, PilotId, Setup, ShipInit, Sim, Weapon};
 ///
 /// // Ship 1 fires down its nose (+Z) at ship 2, 100 m ahead.
 /// let gun = Weapon { range: 200.0, damage: 10.0, radius: 1.0, cooldown_ticks: 10 };
@@ -100,6 +111,8 @@ pub struct HullPart {
 ///     pilots: vec![(PilotId(1), Some(1))],
 ///     ai_pilots: Vec::new(),
 ///     gravity_mu: 0.0,
+///     max_speed_mps: 20_000.0,
+///     ai: AiParams { turn_gain: 3.0, fire_cone: 0.05, standoff: 0.5, unarmed_standoff: 100.0, drift_ticks: 240 },
 /// };
 /// let mut sim = Sim::new(&setup, 1)?;
 /// let hold = Command {

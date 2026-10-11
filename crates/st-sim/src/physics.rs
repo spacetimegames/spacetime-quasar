@@ -23,11 +23,6 @@ use st_time::DT;
 
 use crate::hull::{HullPart, MassModel, PartShape};
 
-/// The fastest a body may go, in metres per second: twice the 10 km/s cruise envelope of
-/// ADR 0007. Rapier clamps every body to 400 m/s by default, which would cap normal flight
-/// (up to 1,000 m/s) and cruise.
-const MAX_LINEAR_VELOCITY: f64 = 20_000.0;
-
 /// The planar constraint of ADR 0007: free motion in the XZ plane and yaw only.
 pub(crate) fn planar() -> LockedAxes {
     LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED_X | LockedAxes::ROTATION_LOCKED_Z
@@ -101,11 +96,14 @@ fn shape_of(part: &HullPart) -> SharedShape {
 }
 
 impl World {
-    pub(crate) fn new() -> Self {
+    /// An empty world. `max_speed_mps` is the fastest any body may go (Rapier's default
+    /// of 400 m/s would cap normal flight); the caller has validated it as finite and
+    /// positive.
+    pub(crate) fn new(max_speed_mps: f64) -> Self {
         Self {
             parameters: IntegrationParameters {
                 dt: DT,
-                normalized_max_linear_velocity: MAX_LINEAR_VELOCITY,
+                normalized_max_linear_velocity: max_speed_mps,
                 ..IntegrationParameters::default()
             },
             islands: IslandManager::new(),

@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use rapier3d_f64::prelude::{RigidBody, RigidBodyHandle};
 use st_math::det;
 use st_math::glam::{DQuat, DVec3};
-use st_rng::Stream;
 use st_time::{DT, TICK_RATE_HZ, Tick};
 
 use crate::command::{
@@ -13,33 +12,36 @@ use crate::command::{
     StepError, wire,
 };
 use crate::hash::{DumpLine, HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
-use crate::hull::{FIRE, HullPart, MAX_HULL_PARTS, MassModel, PartShape, Weapon, mass_model};
+use crate::hull::{HullPart, MAX_HULL_PARTS, MassModel, PartShape, Weapon, mass_model};
 use crate::physics::{BodyInit, World};
+
+mod combat;
 
 /// Hashes are taken every this many ticks (1 s at 120 Hz), at tick 0 and at
 /// the final tick (ADR 0008, "Checkpoints").
+///
+/// ```
+/// assert_eq!(st_sim::CHECKPOINT_INTERVAL, 120);
+/// ```
 pub const CHECKPOINT_INTERVAL: Tick = TICK_RATE_HZ as Tick;
 
 /// The most colliders (one per ship) a system world may hold (ADR 0008).
+///
+/// ```
+/// assert_eq!(st_sim::MAX_SHIPS_PER_SYSTEM, 1 << 20);
+/// ```
 pub const MAX_SHIPS_PER_SYSTEM: usize = 1_048_576;
+
+/// The largest weapon range or radius `Sim::new` accepts, in metres: 10^12 m, about 6.7 AU.
+/// A numeric-safety bound, not a design value: Parry's shape casts panic on degenerate
+/// geometry (a ball of radius 10^300), far beyond any real distance.
+const MAX_WEAPON_EXTENT: f64 = 1.0e12;
 
 /// Axis values are divided by this to get a fraction in `-1.0..=1.0`.
 const AXIS_MAX: f64 = 32767.0;
 
 /// Entity component tag of the ship component (ADR 0008, "State hash").
 const SHIP_COMPONENT_TAG: u32 = 1;
-
-/// How strongly an AI pilot turns toward its target, in axis fractions per radian
-/// of heading error.
-const AI_TURN_GAIN: f64 = 3.0;
-/// An AI pilot holds fire while the target is within this many radians of dead ahead.
-const AI_FIRE_CONE: f64 = 0.05;
-/// An AI pilot tries to hold this fraction of its weapon range from the target.
-const AI_STANDOFF: f64 = 0.5;
-/// Range an AI pilot without a weapon keeps from its target, metres.
-const AI_UNARMED_STANDOFF: f64 = 100.0;
-/// An AI pilot re-rolls its sideways drift every this many ticks.
-const AI_DRIFT_TICKS: Tick = 240;
 
 /// Initial state of one ship.
 ///
@@ -72,10 +74,22 @@ pub struct ShipInit {
     pub ccd: bool,
     /// The side the ship fights for. AI pilots shoot at ships of another team; team 0
     /// has no enemies and is nobody's enemy.
+    ///
+    /// **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+    /// replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+    /// sections); that change bumps `SIM_VERSION`.
     pub team: u32,
     /// Hit points; the ship is destroyed when they reach zero. Positive and finite.
+    ///
+    /// **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+    /// replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+    /// sections); that change bumps `SIM_VERSION`.
     pub hit_points: f64,
     /// The ship's weapon, if it has one.
+    ///
+    /// **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+    /// replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+    /// sections); that change bumps `SIM_VERSION`.
     pub weapon: Option<Weapon>,
 }
 
@@ -116,9 +130,71 @@ pub struct Setup {
     pub pilots: Vec<(PilotId, Option<u64>)>,
     /// AI pilots: each flies the ship it names from inside the simulation, so it takes
     /// no commands (ADR 0009). Ids share one space with `pilots`.
+    ///
+    /// **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+    /// replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+    /// sections); that change bumps `SIM_VERSION`.
     pub ai_pilots: Vec<(PilotId, u64)>,
     /// Strength of the central attractor at the origin, in m^3/s^2.
     pub gravity_mu: f64,
+    /// The fastest any body may go, in metres per second: Rapier's
+    /// `normalized_max_linear_velocity`, whose 400 m/s default would cap normal flight.
+    /// Finite and positive. Whoever builds the setup derives it from data (PD-31 for the
+    /// game); the simulation holds no speed constant.
+    pub max_speed_mps: f64,
+    /// The numbers the AI pilots fly by, one set per setup.
+    pub ai: AiParams,
+}
+
+/// The tuning numbers of the AI pilots of one [`Setup`].
+///
+/// **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+/// replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+/// sections); that change bumps `SIM_VERSION`. Nothing in `assets/`, `st-game` or `apps/`
+/// uses it as content before then.
+///
+/// The step holds no tuning numbers of its own; the scenario or test that builds the
+/// [`Setup`] supplies these. [`Sim::new`] validates them and they are part of the setup
+/// encoding.
+///
+/// ```
+/// use st_sim::AiParams;
+/// let ai = AiParams {
+///     turn_gain: 3.0,
+///     fire_cone: 0.05,
+///     standoff: 0.5,
+///     unarmed_standoff: 100.0,
+///     drift_ticks: 240,
+/// };
+/// assert!(ai.drift_ticks >= 1);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AiParams {
+    /// How strongly a pilot turns toward its target, in axis fractions per radian of
+    /// heading error. Finite and positive.
+    pub turn_gain: f64,
+    /// A pilot holds fire while the target is within this many radians of dead ahead.
+    /// Finite and positive.
+    pub fire_cone: f64,
+    /// A pilot tries to hold this fraction of its weapon range from the target. Finite
+    /// and positive.
+    pub standoff: f64,
+    /// The range, in metres, a pilot without a weapon keeps from its target. Finite and
+    /// positive.
+    pub unarmed_standoff: f64,
+    /// A pilot re-rolls its sideways drift every this many ticks. At least 1.
+    pub drift_ticks: Tick,
+}
+
+impl AiParams {
+    /// Whether every number is in its range.
+    fn is_valid(&self) -> bool {
+        positive(self.turn_gain)
+            && positive(self.fire_cone)
+            && positive(self.standoff)
+            && positive(self.unarmed_standoff)
+            && self.drift_ticks >= 1
+    }
 }
 
 /// A [`Setup`] that cannot start a simulation.
@@ -137,12 +213,20 @@ pub enum SetupError {
     NotFinite,
     /// The hull of this ship is empty, has too many parts, or has an invalid part.
     BadHull(u64),
-    /// The weapon of this ship has a non-positive or non-finite number.
+    /// The weapon of this ship has a non-positive or non-finite number, or a range or radius
+    /// above 10^12 m.
     BadWeapon(u64),
     /// The hit points of this ship are not positive and finite.
     BadHitPoints(u64),
     /// A system has more than [`MAX_SHIPS_PER_SYSTEM`] ships.
     TooManyShips,
+    /// The acceleration, turn rate or drag of this ship is negative. A negative drag
+    /// would make the velocity damping grow without bound.
+    BadDynamics(u64),
+    /// [`Setup::max_speed_mps`] is not finite and positive.
+    BadMaxSpeed,
+    /// A number of [`Setup::ai`] is not finite and positive (`drift_ticks` below 1).
+    BadAiParams,
 }
 
 impl core::fmt::Display for SetupError {
@@ -159,12 +243,21 @@ impl core::fmt::Display for SetupError {
             SetupError::TooManyShips => {
                 write!(f, "a system has more than {MAX_SHIPS_PER_SYSTEM} ships")
             }
+            SetupError::BadDynamics(id) => {
+                write!(
+                    f,
+                    "ship {id} has a negative acceleration, turn rate or drag"
+                )
+            }
+            SetupError::BadMaxSpeed => f.write_str("the maximum speed is not finite and positive"),
+            SetupError::BadAiParams => f.write_str("an AI parameter is out of range"),
         }
     }
 }
 
 impl core::error::Error for SetupError {}
 
+/// A weapon and its cooldown. Part of the provisional determinism fixture of [`combat`].
 #[derive(Clone, Copy, Debug)]
 struct WeaponState {
     spec: Weapon,
@@ -265,6 +358,8 @@ pub struct Sim {
     tick: Tick,
     seed: u64,
     gravity_mu: f64,
+    max_speed_mps: f64,
+    ai: AiParams,
     ships: BTreeMap<u64, Ship>,
     pilots: BTreeMap<PilotId, Pilot>,
     worlds: BTreeMap<u64, World>,
@@ -299,20 +394,6 @@ fn positive(x: f64) -> bool {
     x.is_finite() && x > 0.0
 }
 
-/// An axis fraction in `-1.0..=1.0` as the quantised command value.
-fn quantise(fraction: f64) -> i16 {
-    (det::clamp(fraction, -1.0, 1.0) * AXIS_MAX).round() as i16
-}
-
-/// What an AI pilot sees of one ship.
-#[derive(Clone, Copy)]
-struct Contact {
-    id: u64,
-    system: u64,
-    team: u32,
-    position: DVec3,
-}
-
 impl Sim {
     /// Builds a simulation at tick 0 from a setup and a world seed.
     ///
@@ -321,10 +402,18 @@ impl Sim {
     /// # Errors
     ///
     /// A [`SetupError`] if ids repeat, a pilot names a missing ship, a number is NaN
-    /// or infinite, or a hull, weapon or hit-point value is invalid.
+    /// or infinite, a ship has a negative acceleration, turn rate or drag, the maximum
+    /// speed or an AI parameter is out of range, or a hull, weapon or hit-point value is
+    /// invalid. No setup that passes is known to make [`Sim::step`] panic.
     pub fn new(setup: &Setup, seed: u64) -> Result<Sim, SetupError> {
         if !setup.gravity_mu.is_finite() {
             return Err(SetupError::NotFinite);
+        }
+        if !positive(setup.max_speed_mps) {
+            return Err(SetupError::BadMaxSpeed);
+        }
+        if !setup.ai.is_valid() {
+            return Err(SetupError::BadAiParams);
         }
         let mut ships = BTreeMap::new();
         let mut worlds: BTreeMap<u64, World> = BTreeMap::new();
@@ -347,13 +436,18 @@ impl Sim {
             if !finite {
                 return Err(SetupError::NotFinite);
             }
+            if s.max_accel < 0.0 || s.max_turn_rate < 0.0 || s.drag < 0.0 {
+                return Err(SetupError::BadDynamics(s.id));
+            }
             if !positive(s.hit_points) {
                 return Err(SetupError::BadHitPoints(s.id));
             }
             if let Some(w) = &s.weapon
                 && !(positive(w.range)
+                    && w.range <= MAX_WEAPON_EXTENT
                     && positive(w.damage)
                     && positive(w.radius)
+                    && w.radius <= MAX_WEAPON_EXTENT
                     && w.cooldown_ticks >= 1)
             {
                 return Err(SetupError::BadWeapon(s.id));
@@ -362,7 +456,9 @@ impl Sim {
                 return Err(SetupError::BadHull(s.id));
             }
             let mass: MassModel = mass_model(&s.hull).ok_or(SetupError::BadHull(s.id))?;
-            let world = worlds.entry(s.system).or_insert_with(World::new);
+            let world = worlds
+                .entry(s.system)
+                .or_insert_with(|| World::new(setup.max_speed_mps));
             if world.bodies.len() >= MAX_SHIPS_PER_SYSTEM {
                 return Err(SetupError::TooManyShips);
             }
@@ -441,6 +537,8 @@ impl Sim {
             tick: 0,
             seed,
             gravity_mu: setup.gravity_mu,
+            max_speed_mps: setup.max_speed_mps,
+            ai: setup.ai,
             ships,
             pilots,
             worlds,
@@ -448,11 +546,29 @@ impl Sim {
     }
 
     /// The current tick: the number of steps taken so far.
+    ///
+    /// ```
+    /// use st_sim::scenarios;
+    /// let s = scenarios::solo_burn();
+    /// let mut sim = st_sim::Sim::new(&s.setup, s.seed)?;
+    /// assert_eq!(sim.tick(), 0);
+    /// sim.step(&[])?;
+    /// assert_eq!(sim.tick(), 1);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn tick(&self) -> Tick {
         self.tick
     }
 
     /// The world seed.
+    ///
+    /// ```
+    /// use st_sim::scenarios;
+    /// let s = scenarios::solo_burn();
+    /// let sim = st_sim::Sim::new(&s.setup, 99)?;
+    /// assert_eq!(sim.seed(), 99);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn seed(&self) -> u64 {
         self.seed
     }
@@ -463,6 +579,21 @@ impl Sim {
 
     /// A ship's position and velocity, if it exists and is not destroyed. For
     /// tests and tools; the simulation never reads this back.
+    ///
+    /// ```
+    /// use st_math::glam::DVec3;
+    /// use st_sim::{Setup, ShipInit, Sim};
+    /// # use st_sim::AiParams;
+    /// # let ai = AiParams { turn_gain: 3.0, fire_cone: 0.05, standoff: 0.5, unarmed_standoff: 100.0, drift_ticks: 240 };
+    /// let ship = ShipInit { id: 1, position: DVec3::new(5.0, 0.0, 0.0), ..ShipInit::default() };
+    /// let setup = Setup { ships: vec![ship], pilots: Vec::new(), ai_pilots: Vec::new(), gravity_mu: 0.0, max_speed_mps: 20_000.0, ai };
+    /// let sim = Sim::new(&setup, 0)?;
+    /// let (position, velocity) = sim.ship_state(1).expect("the ship exists");
+    /// assert_eq!(position, DVec3::new(5.0, 0.0, 0.0));
+    /// assert_eq!(velocity, DVec3::ZERO);
+    /// assert!(sim.ship_state(2).is_none());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn ship_state(&self, id: u64) -> Option<(DVec3, DVec3)> {
         let body = self.body_of(self.ships.get(&id)?)?;
         Some((body.translation(), body.linvel()))
@@ -470,6 +601,20 @@ impl Sim {
 
     /// A ship's heading (yaw about +Y, radians in `-pi..=pi`), if it exists and is
     /// not destroyed. For tests and tools.
+    ///
+    /// ```
+    /// use st_math::glam::DVec3;
+    /// use st_sim::{Setup, ShipInit, Sim};
+    /// # use st_sim::AiParams;
+    /// # let ai = AiParams { turn_gain: 3.0, fire_cone: 0.05, standoff: 0.5, unarmed_standoff: 100.0, drift_ticks: 240 };
+    /// let ship = ShipInit { id: 1, position: DVec3::new(5.0, 0.0, 0.0), ..ShipInit::default() };
+    /// let setup = Setup { ships: vec![ship], pilots: Vec::new(), ai_pilots: Vec::new(), gravity_mu: 0.0, max_speed_mps: 20_000.0, ai };
+    /// let sim = Sim::new(&setup, 0)?;
+    /// // Heading 0 is the +Z axis (ADR 0007).
+    /// assert!(sim.ship_heading(1).expect("the ship exists").abs() < 1e-12);
+    /// assert!(sim.ship_heading(2).is_none());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn ship_heading(&self, id: u64) -> Option<f64> {
         let body = self.body_of(self.ships.get(&id)?)?;
         let nose = *body.rotation() * DVec3::Z;
@@ -478,6 +623,23 @@ impl Sim {
 
     /// A ship's remaining hit points (zero once destroyed), if it exists. For tests
     /// and tools.
+    ///
+    /// **Provisional determinism fixture (SPAC-128), not the PD-28 combat rules.** Phase 2
+    /// replaces it with the PD-28 rules (beam and bolt prototypes, shields, armour facings,
+    /// sections); that change bumps `SIM_VERSION`.
+    ///
+    /// ```
+    /// use st_math::glam::DVec3;
+    /// use st_sim::{Setup, ShipInit, Sim};
+    /// # use st_sim::AiParams;
+    /// # let ai = AiParams { turn_gain: 3.0, fire_cone: 0.05, standoff: 0.5, unarmed_standoff: 100.0, drift_ticks: 240 };
+    /// let ship = ShipInit { id: 1, position: DVec3::new(5.0, 0.0, 0.0), ..ShipInit::default() };
+    /// let setup = Setup { ships: vec![ship], pilots: Vec::new(), ai_pilots: Vec::new(), gravity_mu: 0.0, max_speed_mps: 20_000.0, ai };
+    /// let sim = Sim::new(&setup, 0)?;
+    /// assert_eq!(sim.ship_hit_points(1), Some(100.0));
+    /// assert_eq!(sim.ship_hit_points(2), None);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn ship_hit_points(&self, id: u64) -> Option<f64> {
         self.ships.get(&id).map(|s| s.hit_points)
     }
@@ -488,8 +650,8 @@ impl Sim {
     /// strictly ascending by (pilot, sequence number); see
     /// [`command::sort`](crate::command::sort). Within the tick, commands
     /// apply first, then AI pilots choose their controls, then weapons fire,
-    /// then controls and gravity act on the bodies and every physics world
-    /// takes one step.
+    /// then controls and gravity act on the bodies, every physics world
+    /// takes one step and the bodies of ships destroyed in the tick are removed.
     ///
     /// Before anything else it checks `st_math::det::fp_env_is_default()` (ADR 0008).
     ///
@@ -520,6 +682,7 @@ impl Sim {
         for world in self.worlds.values_mut() {
             world.step();
         }
+        self.remove_destroyed();
         self.tick += 1;
         Ok(())
     }
@@ -584,158 +747,6 @@ impl Sim {
         steering
     }
 
-    /// AI pilots, in ascending pilot id, choose controls from the state at the start
-    /// of the tick: face and approach the nearest enemy to a standoff distance, drift
-    /// sideways (a seeded choice that changes every [`AI_DRIFT_TICKS`] ticks) and fire
-    /// while it is ahead and in range.
-    fn run_ai(&mut self) {
-        if self.pilots.values().all(|p| p.external) {
-            return;
-        }
-        let mut contacts = Vec::new();
-        for (&id, ship) in &self.ships {
-            if let Some(body) = self.body_of(ship) {
-                contacts.push(Contact {
-                    id,
-                    system: ship.system,
-                    team: ship.team,
-                    position: body.translation(),
-                });
-            }
-        }
-        let drift = Stream::from_seed(self.seed).derive_label("ai-drift");
-        let epoch = self.tick / AI_DRIFT_TICKS;
-        let mut chosen = Vec::new();
-        for (&pilot_id, pilot) in &self.pilots {
-            let Some(ship_id) = pilot.controlled.filter(|_| !pilot.external) else {
-                continue;
-            };
-            let Some(ship) = self.ships.get(&ship_id) else {
-                continue;
-            };
-            let Some(body) = self.body_of(ship) else {
-                // Destroyed: the controls stay as they were and act on nothing.
-                continue;
-            };
-            let me = body.translation();
-            let enemy = contacts
-                .iter()
-                .filter(|c| {
-                    c.system == ship.system && c.team != ship.team && c.team != 0 && ship.team != 0
-                })
-                .min_by(|a, b| {
-                    let da = (a.position - me).length_squared();
-                    let db = (b.position - me).length_squared();
-                    da.total_cmp(&db).then(a.id.cmp(&b.id))
-                });
-            let Some(enemy) = enemy else {
-                chosen.push((pilot_id, ControlState::default()));
-                continue;
-            };
-            let to = enemy.position - me;
-            let distance = to.length();
-            let nose = *body.rotation() * DVec3::Z;
-            let error = {
-                let raw = det::atan2(to.x, to.z) - det::atan2(nose.x, nose.z);
-                // Wrap into (-pi, pi].
-                raw - core::f64::consts::TAU * (raw / core::f64::consts::TAU).round()
-            };
-            let range = ship.weapon.map_or(0.0, |w| w.spec.range);
-            let standoff = if range > 0.0 {
-                AI_STANDOFF * range
-            } else {
-                AI_UNARMED_STANDOFF
-            };
-            let thrust = if error.abs() < core::f64::consts::FRAC_PI_2 {
-                (distance - standoff) / standoff
-            } else {
-                0.0
-            };
-            let sideways = match drift.derive(pilot_id.0).derive(epoch).below_at(0, 3) {
-                0 => -0.5,
-                1 => 0.5,
-                _ => 0.0,
-            };
-            let fire = range > 0.0 && error.abs() < AI_FIRE_CONE && distance <= range;
-            chosen.push((
-                pilot_id,
-                ControlState {
-                    thrust: quantise(thrust),
-                    strafe: quantise(sideways),
-                    turn: quantise(AI_TURN_GAIN * error),
-                    aim: None,
-                    buttons: if fire { FIRE } else { 0 },
-                },
-            ));
-        }
-        for (id, controls) in chosen {
-            if let Some(pilot) = self.pilots.get_mut(&id) {
-                pilot.controls = controls;
-            }
-        }
-    }
-
-    /// Weapons of ships whose pilot holds fire sweep a ball along the heading. All
-    /// sweeps of a tick see the same state; the damage lands afterwards, in ascending
-    /// shooter id, and ships with no hit points left are removed from their world.
-    fn fire_weapons(&mut self) {
-        let steering = self.steering();
-        let tick = self.tick;
-        let mut hits: Vec<(u64, u64)> = Vec::new();
-        for (&id, ship) in &mut self.ships {
-            let Some(weapon) = &mut ship.weapon else {
-                continue;
-            };
-            let held = steering.get(&id).is_some_and(|c| c.buttons & FIRE != 0);
-            if !held || tick < weapon.ready_tick {
-                continue;
-            }
-            let Some(world) = self.worlds.get(&ship.system) else {
-                continue;
-            };
-            let Some(handle) = ship.body else {
-                continue;
-            };
-            let Some(body) = world.bodies.get(handle) else {
-                continue;
-            };
-            weapon.ready_tick = tick + Tick::from(weapon.spec.cooldown_ticks);
-            let nose = (*body.rotation() * DVec3::Z).normalize();
-            if !finite3(nose) {
-                continue;
-            }
-            let spec = weapon.spec;
-            if let Some(target) =
-                world.sweep(handle, body.translation(), nose, spec.radius, spec.range)
-            {
-                hits.push((id, target));
-            }
-        }
-        for (shooter, target) in hits {
-            let damage = self
-                .ships
-                .get(&shooter)
-                .and_then(|s| s.weapon)
-                .map_or(0.0, |w| w.spec.damage);
-            if let Some(s) = self.ships.get_mut(&shooter) {
-                s.hits += 1;
-            }
-            if let Some(t) = self.ships.get_mut(&target) {
-                t.hit_points -= damage;
-            }
-        }
-        for ship in self.ships.values_mut() {
-            if ship.hit_points <= 0.0 {
-                ship.hit_points = 0.0;
-                if let Some(handle) = ship.body.take()
-                    && let Some(world) = self.worlds.get_mut(&ship.system)
-                {
-                    world.remove_ship(handle);
-                }
-            }
-        }
-    }
-
     /// Thrust, strafe, turn, central gravity and drag, as velocities and impulses on
     /// the bodies, in ascending ship id. Uses only `st_math::det` for transcendental
     /// functions.
@@ -768,7 +779,13 @@ impl Sim {
             let damping = det::exp(-ship.drag * DT);
             let mass = body.mass();
             body.set_linvel(body.linvel() * damping, true);
-            body.apply_impulse(accel * (mass * DT), true);
+            // A product that overflows (or divides by a denormal above) would put an
+            // infinity in the body and a NaN after it, which Rapier cannot survive. Skipping
+            // the impulse is deterministic: it depends on the state alone.
+            let impulse = accel * (mass * DT);
+            if finite3(impulse) {
+                body.apply_impulse(impulse, true);
+            }
             // Turning is a rate command about +Y: the planar lock holds the other axes.
             let rate = ship.max_turn_rate * (f64::from(controls.turn) / AXIS_MAX);
             body.set_angvel(DVec3::new(0.0, rate, 0.0), true);
@@ -837,6 +854,12 @@ impl Sim {
         h.begin_line("GLOB", None);
         h.tag(b"GLOB");
         h.f64(self.gravity_mu)?;
+        h.f64(self.max_speed_mps)?;
+        h.f64(self.ai.turn_gain)?;
+        h.f64(self.ai.fire_cone)?;
+        h.f64(self.ai.standoff)?;
+        h.f64(self.ai.unarmed_standoff)?;
+        h.u64(self.ai.drift_ticks);
         Ok(())
     }
 }
@@ -856,12 +879,25 @@ mod tests {
         }
     }
 
+    /// AI numbers for the tests. The step holds none of its own.
+    fn test_ai() -> AiParams {
+        AiParams {
+            turn_gain: 3.0,
+            fire_cone: 0.05,
+            standoff: 0.5,
+            unarmed_standoff: 100.0,
+            drift_ticks: 240,
+        }
+    }
+
     fn setup() -> Setup {
         Setup {
             ships: vec![ship_at(1, DVec3::new(10.0, 0.0, 0.0))],
             pilots: vec![(PilotId(1), Some(1))],
             ai_pilots: Vec::new(),
             gravity_mu: 0.0,
+            max_speed_mps: 20_000.0,
+            ai: test_ai(),
         }
     }
 
@@ -1034,6 +1070,8 @@ mod tests {
             pilots: Vec::new(),
             ai_pilots: vec![(PilotId(1), 1), (PilotId(2), 2)],
             gravity_mu: 0.0,
+            max_speed_mps: 20_000.0,
+            ai: test_ai(),
         }
     }
 
@@ -1090,6 +1128,248 @@ mod tests {
         let mut s = setup();
         s.ai_pilots.push((PilotId(9), 77));
         assert_eq!(Sim::new(&s, 0).unwrap_err(), SetupError::UnknownShip(77));
+    }
+
+    #[test]
+    fn negative_dynamics_are_refused() {
+        // A drag of -1e5 made `exp(-drag * DT)` overflow, the velocity NaN and Rapier panic.
+        for (drag, accel, turn) in [
+            (-1.0e5, 25.0, 1.5),
+            (-1.0e-9, 25.0, 1.5),
+            (-f64::MAX, 25.0, 1.5),
+            (0.01, -1.0, 1.5),
+            (0.01, 25.0, -1.0),
+            (0.01, f64::NEG_INFINITY, 1.5),
+        ] {
+            let mut s = setup();
+            s.ships[0].drag = drag;
+            s.ships[0].max_accel = accel;
+            s.ships[0].max_turn_rate = turn;
+            let err = Sim::new(&s, 0).unwrap_err();
+            assert!(
+                matches!(err, SetupError::BadDynamics(1) | SetupError::NotFinite),
+                "{drag} {accel} {turn}: {err:?}"
+            );
+        }
+        let mut s = setup();
+        s.ships[0].drag = f64::NAN;
+        assert_eq!(Sim::new(&s, 0).unwrap_err(), SetupError::NotFinite);
+        // Zero is allowed, and so is a large positive drag.
+        for drag in [0.0, 1.0e300] {
+            let mut s = setup();
+            s.ships[0].drag = drag;
+            s.ships[0].max_accel = 0.0;
+            s.ships[0].max_turn_rate = 0.0;
+            let mut sim = Sim::new(&s, 0).unwrap();
+            sim.step(&[]).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_speed_limit_and_the_ai_numbers_are_validated() {
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut s = setup();
+            s.max_speed_mps = bad;
+            assert_eq!(Sim::new(&s, 0).unwrap_err(), SetupError::BadMaxSpeed);
+        }
+        type Field = fn(&mut AiParams) -> &mut f64;
+        let fields: [Field; 4] = [
+            |a| &mut a.turn_gain,
+            |a| &mut a.fire_cone,
+            |a| &mut a.standoff,
+            |a| &mut a.unarmed_standoff,
+        ];
+        for field in fields {
+            for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+                let mut s = setup();
+                *field(&mut s.ai) = bad;
+                assert_eq!(Sim::new(&s, 0).unwrap_err(), SetupError::BadAiParams);
+            }
+        }
+        let mut s = setup();
+        s.ai.drift_ticks = 0;
+        assert_eq!(Sim::new(&s, 0).unwrap_err(), SetupError::BadAiParams);
+        s.ai.drift_ticks = 1;
+        assert!(Sim::new(&s, 0).is_ok());
+    }
+
+    #[test]
+    fn the_speed_limit_is_the_setups_not_a_constant() {
+        // 30 km/s is above the old 20 km/s code constant and above Rapier's 400 m/s.
+        let mut s = setup();
+        s.ships[0].velocity = DVec3::new(0.0, 0.0, 30_000.0);
+        s.ships[0].drag = 0.0;
+        s.max_speed_mps = 50_000.0;
+        let mut sim = Sim::new(&s, 0).unwrap();
+        sim.step(&[]).unwrap();
+        assert!((sim.ship_state(1).unwrap().1.z - 30_000.0).abs() < 1e-6);
+        // A lower limit clamps.
+        s.max_speed_mps = 1_000.0;
+        let mut sim = Sim::new(&s, 0).unwrap();
+        sim.step(&[]).unwrap();
+        assert!(sim.ship_state(1).unwrap().1.length() <= 1_000.0 + 1e-6);
+    }
+
+    /// Huge but valid numbers must never panic, whatever they do to the state.
+    #[test]
+    fn extreme_valid_setups_never_panic() {
+        let big = 1.0e300;
+        let gun = Weapon {
+            range: big,
+            damage: big,
+            radius: big,
+            cooldown_ticks: u32::MAX,
+        };
+        let variants: Vec<Box<dyn Fn(&mut Setup)>> = vec![
+            Box::new(move |s| s.ships[0].drag = big),
+            Box::new(move |s| s.ships[0].max_accel = big),
+            Box::new(move |s| s.ships[0].max_turn_rate = big),
+            Box::new(move |s| s.ships[0].position = DVec3::splat(big)),
+            Box::new(move |s| s.ships[0].velocity = DVec3::splat(big)),
+            Box::new(move |s| s.gravity_mu = big),
+            Box::new(move |s| s.gravity_mu = -big),
+            Box::new(move |s| s.max_speed_mps = f64::MAX),
+            Box::new(move |s| s.max_speed_mps = f64::MIN_POSITIVE),
+            Box::new(move |s| s.ships[0].hit_points = f64::MIN_POSITIVE),
+            Box::new(move |s| s.ships[0].weapon = Some(gun)),
+            Box::new(move |s| {
+                s.ai = AiParams {
+                    turn_gain: big,
+                    fire_cone: big,
+                    standoff: big,
+                    unarmed_standoff: big,
+                    drift_ticks: u64::MAX,
+                }
+            }),
+            Box::new(move |s| {
+                s.ai = AiParams {
+                    turn_gain: f64::MIN_POSITIVE,
+                    fire_cone: f64::MIN_POSITIVE,
+                    standoff: f64::MIN_POSITIVE,
+                    unarmed_standoff: f64::MIN_POSITIVE,
+                    drift_ticks: 1,
+                }
+            }),
+        ];
+        for (n, variant) in variants.iter().enumerate() {
+            eprintln!("variant {n}");
+            let mut s = duel();
+            variant(&mut s);
+            s.ships[1].weapon = Some(Weapon {
+                range: 500.0,
+                damage: 10.0,
+                radius: 2.0,
+                cooldown_ticks: 6,
+            });
+            let Ok(mut sim) = Sim::new(&s, 7) else {
+                continue;
+            };
+            for _ in 0..40 {
+                // The state may turn to NaN; a step must still return, not panic.
+                let _ = sim.step(&[]);
+            }
+            let _ = sim.state_hash();
+        }
+    }
+
+    /// Rapier's island manager panics when a body is removed before its world has taken a
+    /// real step; a ship that dies on the first tick must not trigger that.
+    #[test]
+    fn a_ship_destroyed_on_the_first_tick_is_removed_without_a_panic() {
+        let mut s = duel();
+        s.ships[0].hit_points = 5.0;
+        let mut sim = Sim::new(&s, 7).unwrap();
+        sim.step(&[]).unwrap();
+        assert_eq!(sim.ship_hit_points(1), Some(0.0));
+        assert_eq!(sim.ship_state(1), None);
+        for _ in 0..20 {
+            sim.step(&[]).unwrap();
+        }
+        assert!(sim.ship_state(2).is_some());
+    }
+
+    /// A seeded sweep over extreme magnitudes of every number a setup carries. A panic
+    /// anywhere (in this crate, Rapier or Parry) fails the test. The state may well turn to
+    /// NaN; a step must still return.
+    #[test]
+    fn random_extreme_setups_never_panic() {
+        let mags = [1e-300, 1e-9, 1.0, 1e3, 1e6, 1e9, 1e12, 1e100, 1e300];
+        let state = std::cell::Cell::new(0x1234567_u64);
+        let next = || {
+            let mut x = state.get();
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            state.set(x);
+            x
+        };
+        for case in 0..600 {
+            let pick = |signed: bool| {
+                let m = mags[(next() % mags.len() as u64) as usize];
+                if signed && next() % 2 == 0 { -m } else { m }
+            };
+            let mut s = duel();
+            for i in 0..4 {
+                let ship = &mut s.ships[i % 2];
+                let i = i % 2;
+                let which = next() % 8;
+                match which {
+                    0 => {
+                        let v = pick(true);
+                        ship.position = DVec3::new(-150.0 + 300.0 * i as f64, 0.0, v);
+                    }
+                    1 => {
+                        let v = pick(true);
+                        ship.velocity = DVec3::new(v, 0.0, v);
+                    }
+                    2 => {
+                        let v = pick(false);
+                        ship.max_accel = v;
+                    }
+                    3 => {
+                        let v = pick(false);
+                        ship.drag = v;
+                    }
+                    4 => {
+                        let (r, d, rad) = (pick(false), pick(false), pick(false));
+                        ship.weapon = Some(Weapon {
+                            range: r,
+                            damage: d,
+                            radius: rad,
+                            cooldown_ticks: 1,
+                        });
+                    }
+                    5 => {
+                        let v = pick(false);
+                        ship.hit_points = v;
+                    }
+                    6 => {
+                        let v = pick(false);
+                        if let PartShape::Cuboid { half_extents } = &mut ship.hull[0].shape {
+                            *half_extents = DVec3::splat(v);
+                        }
+                    }
+                    _ => {
+                        let v = pick(false);
+                        ship.hull[0].density = v;
+                    }
+                }
+            }
+            if next() % 3 == 0 {
+                let v = pick(true);
+                s.gravity_mu = v;
+            }
+            if next() % 3 == 0 {
+                let v = pick(false);
+                s.max_speed_mps = v;
+            }
+            if let Ok(mut sim) = Sim::new(&s, case) {
+                for _ in 0..40 {
+                    let _ = sim.step(&[]);
+                }
+                let _ = sim.state_hash();
+            }
+        }
     }
 
     #[test]

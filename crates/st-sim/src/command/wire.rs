@@ -45,7 +45,7 @@ use st_math::glam::{DQuat, DVec3};
 
 use super::{CommandKind, ControlState, PilotId};
 use crate::hull::{HullPart, PartShape, Weapon};
-use crate::sim::{Setup, ShipInit};
+use crate::sim::{AiParams, Setup, ShipInit};
 
 /// Wire tag of [`CommandKind::Controls`]. Tags are never reused, even after
 /// a variant is removed. Ranges: 1 to 999 are pilot kinds, 1000 to 1999
@@ -527,7 +527,8 @@ fn get_part(d: &mut Decoder<'_>) -> Result<HullPart, WireError> {
 }
 
 /// Appends the encoding of a setup: the ships in order (each with its hull and
-/// weapon), the pilots in order, the AI pilots in order and the attractor strength.
+/// weapon), the pilots in order, the AI pilots in order, the attractor strength, the
+/// maximum speed and the five AI parameters.
 /// The layout belongs to `st-sim` and follows [`SIM_VERSION`](crate::SIM_VERSION).
 ///
 /// # Errors
@@ -578,7 +579,14 @@ pub fn encode_setup(out: &mut Vec<u8>, setup: &Setup) -> Result<(), WireError> {
         out.extend_from_slice(&id.0.to_le_bytes());
         out.extend_from_slice(&ship.to_le_bytes());
     }
-    put_f64(out, setup.gravity_mu)
+    put_f64(out, setup.gravity_mu)?;
+    put_f64(out, setup.max_speed_mps)?;
+    put_f64(out, setup.ai.turn_gain)?;
+    put_f64(out, setup.ai.fire_cone)?;
+    put_f64(out, setup.ai.standoff)?;
+    put_f64(out, setup.ai.unarmed_standoff)?;
+    out.extend_from_slice(&setup.ai.drift_ticks.to_le_bytes());
+    Ok(())
 }
 
 /// Decodes a setup written by [`encode_setup`]. The result is not validated
@@ -646,11 +654,21 @@ pub fn decode_setup(d: &mut Decoder<'_>) -> Result<Setup, WireError> {
         ai_pilots.push((PilotId(d.u64()?), d.u64()?));
     }
     let gravity_mu = d.f64()?;
+    let max_speed_mps = d.f64()?;
+    let ai = AiParams {
+        turn_gain: d.f64()?,
+        fire_cone: d.f64()?,
+        standoff: d.f64()?,
+        unarmed_standoff: d.f64()?,
+        drift_ticks: d.u64()?,
+    };
     Ok(Setup {
         ships,
         pilots,
         ai_pilots,
         gravity_mu,
+        max_speed_mps,
+        ai,
     })
 }
 
@@ -747,6 +765,14 @@ pub fn golden_bytes() -> Vec<u8> {
         pilots: vec![(PilotId(1), Some(7)), (PilotId(2), None)],
         ai_pilots: vec![(PilotId(3), 7)],
         gravity_mu: 1.0e9,
+        max_speed_mps: 20_000.0,
+        ai: AiParams {
+            turn_gain: 3.0,
+            fire_cone: 0.05,
+            standoff: 0.5,
+            unarmed_standoff: 100.0,
+            drift_ticks: 240,
+        },
     };
     // The sample is finite, so encoding cannot fail; the unit test would
     // notice an empty tail.
@@ -946,6 +972,14 @@ mod tests {
             pilots: vec![(PilotId(3), None), (PilotId(1), Some(u64::MAX))],
             ai_pilots: vec![(PilotId(9), 5)],
             gravity_mu: 1.0,
+            max_speed_mps: 2.5e4,
+            ai: AiParams {
+                turn_gain: 2.0,
+                fire_cone: 0.1,
+                standoff: 0.25,
+                unarmed_standoff: 50.0,
+                drift_ticks: u64::MAX,
+            },
         };
         encode_setup(&mut out, &setup).unwrap();
         let mut d = Decoder::new(&out);
@@ -966,6 +1000,14 @@ mod tests {
             pilots: Vec::new(),
             ai_pilots: Vec::new(),
             gravity_mu: f64::NAN,
+            max_speed_mps: 1.0,
+            ai: AiParams {
+                turn_gain: 1.0,
+                fire_cone: 1.0,
+                standoff: 1.0,
+                unarmed_standoff: 1.0,
+                drift_ticks: 1,
+            },
         };
         assert_eq!(
             encode_setup(&mut Vec::new(), &setup),
@@ -974,10 +1016,36 @@ mod tests {
         setup.gravity_mu = 1.0;
         let mut out = Vec::new();
         encode_setup(&mut out, &setup).unwrap();
+        // The tail is the six numbers (gravity, speed limit, four AI numbers) and the
+        // drift ticks, eight bytes each.
         let n = out.len();
-        out[n - 8..].copy_from_slice(&f64::INFINITY.to_bits().to_le_bytes());
+        for field in 0..6 {
+            let mut bad = out.clone();
+            let at = n - 56 + 8 * field;
+            bad[at..at + 8].copy_from_slice(&f64::INFINITY.to_bits().to_le_bytes());
+            assert_eq!(
+                decode_setup(&mut Decoder::new(&bad)),
+                Err(WireError::NonFinite),
+                "field {field}"
+            );
+        }
+        let mut bad = Setup {
+            max_speed_mps: f64::NAN,
+            ..setup.clone()
+        };
         assert_eq!(
-            decode_setup(&mut Decoder::new(&out)),
+            encode_setup(&mut Vec::new(), &bad),
+            Err(WireError::NonFinite)
+        );
+        bad = Setup {
+            ai: AiParams {
+                fire_cone: f64::NAN,
+                ..setup.ai
+            },
+            ..setup
+        };
+        assert_eq!(
+            encode_setup(&mut Vec::new(), &bad),
             Err(WireError::NonFinite)
         );
     }
@@ -1003,10 +1071,16 @@ mod tests {
         // The tail is the setup: ship count, one ship of 382 bytes (96, the flag, team, hit points,
         // a 29-byte weapon, a hull count and parts of 89, 73 and 81 bytes), pilot count,
         // two pilots of 17 and 9 bytes, the AI pilot count, one AI pilot of 16 bytes and
-        // the attractor strength.
+        // the attractor strength, the speed limit, four AI numbers and the AI drift ticks (8
+        // bytes each).
         let tail = &bytes[frames.len() / 2..];
-        assert_eq!(tail.len(), 1 + 382 + 1 + 17 + 9 + 1 + 16 + 8);
+        assert_eq!(
+            tail.len(),
+            1 + 382 + 1 + 17 + 9 + 1 + 16 + 8 + 8 + 4 * 8 + 8
+        );
         assert_eq!(tail[0], 1);
-        assert!(tail.ends_with(&1.0e9_f64.to_bits().to_le_bytes()));
+        assert!(tail.ends_with(&240_u64.to_le_bytes()));
+        let mu_at = tail.len() - 6 * 8 - 8;
+        assert_eq!(tail[mu_at..mu_at + 8], 1.0e9_f64.to_bits().to_le_bytes());
     }
 }

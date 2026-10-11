@@ -5,7 +5,7 @@ use std::fmt;
 
 use st_math::glam::DVec3;
 use st_sim::scenarios::{RunError, Scenario};
-use st_sim::{Command, CommandKind, ControlState, PilotId, Setup, SetupError, ShipInit};
+use st_sim::{AiParams, Command, CommandKind, ControlState, PilotId, Setup, SetupError, ShipInit};
 use st_time::{DT, TICK_RATE_HZ, Tick};
 
 use crate::envelope::SpaceEnvelope;
@@ -176,7 +176,15 @@ fn build_with_times(env: &SpaceEnvelope) -> Result<(Scenario, f64, f64), ReplayE
     let normal = Trip::new(env.normal_speed_mps, accel, length_m);
     let cruise = Trip::new(env.cruise_speed_mps(), accel, length_m);
     let (normal_s, cruise_s) = (normal.total_s(), cruise.total_s());
-    if !(normal_s.is_finite() && cruise_s.is_finite() && radius_m.is_finite()) {
+    // The speed limit of the simulation: twice the cruise speed of the envelope, so that
+    // no code constant depends on the provisional PD-31 numbers and raising the cruise
+    // multiplier never clamps a ship silently.
+    let max_speed_mps = 2.0 * env.cruise_speed_mps();
+    if !(normal_s.is_finite()
+        && cruise_s.is_finite()
+        && radius_m.is_finite()
+        && max_speed_mps.is_finite())
+    {
         return Err(ReplayError::NotFinite);
     }
     let slowest = if normal_s > cruise_s {
@@ -222,6 +230,15 @@ fn build_with_times(env: &SpaceEnvelope) -> Result<(Scenario, f64, f64), ReplayE
             pilots: vec![(PilotId(1), Some(1)), (PilotId(2), Some(2))],
             ai_pilots: Vec::new(),
             gravity_mu: 0.0,
+            max_speed_mps,
+            // The demo has no AI pilots, so these numbers are never used.
+            ai: AiParams {
+                turn_gain: 1.0,
+                fire_cone: 1.0,
+                standoff: 1.0,
+                unarmed_standoff: 1.0,
+                drift_ticks: 1,
+            },
         },
         commands,
         ticks: ticks_f as Tick,

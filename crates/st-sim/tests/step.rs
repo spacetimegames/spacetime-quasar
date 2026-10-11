@@ -3,8 +3,8 @@
 
 use st_math::glam::DVec3;
 use st_sim::{
-    Command, CommandKind, ControlState, PilotId, Setup, ShipInit, Sim, StepError, command,
-    scenarios,
+    AiParams, Command, CommandKind, ControlState, PilotId, Setup, ShipInit, Sim, StepError,
+    command, scenarios,
 };
 use st_time::{DT, FixedStep, Nanos};
 
@@ -24,6 +24,14 @@ fn setup() -> Setup {
         pilots: vec![(PilotId(1), Some(7)), (PilotId(2), None)],
         ai_pilots: Vec::new(),
         gravity_mu: 0.0,
+        max_speed_mps: 20_000.0,
+        ai: AiParams {
+            turn_gain: 3.0,
+            fire_cone: 0.05,
+            standoff: 0.5,
+            unarmed_standoff: 100.0,
+            drift_ticks: 240,
+        },
     }
 }
 

@@ -15,7 +15,7 @@ use st_time::Tick;
 
 use crate::command::{Command, CommandKind, ControlState, PilotId, StepError};
 use crate::hash::{DumpLine, HashError};
-use crate::sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
+use crate::sim::{AiParams, CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
 
 mod fleets;
 mod kernels;
@@ -25,6 +25,18 @@ pub use kernels::{EDGE, MathKernels, math_kernels};
 
 /// Attractor strength shared by the scenarios, in m^3/s^2.
 const MU: f64 = 1.0e9;
+/// The speed limit of the pinned scenarios, in metres per second. The scenarios are defined in
+/// code (ADR 0009), so they carry their own limit; a game builds its setups from data.
+const MAX_SPEED_MPS: f64 = 20_000.0;
+/// The AI numbers of the pinned scenarios (`combat-60s`). A provisional determinism fixture
+/// (SPAC-128), not the PD-28 combat rules; scenarios without AI pilots carry them unused.
+const AI: AiParams = AiParams {
+    turn_gain: 3.0,
+    fire_cone: 0.05,
+    standoff: 0.5,
+    unarmed_standoff: 100.0,
+    drift_ticks: 240,
+};
 /// Distance from the origin of the far-out scenarios: 500 km, where `f32`
 /// positions would already be coarse (ADR 0007).
 const FAR: f64 = 500_000.0;
@@ -257,6 +269,8 @@ pub fn solo_burn() -> Scenario {
             pilots: vec![(PilotId(1), Some(1))],
             ai_pilots: Vec::new(),
             gravity_mu: MU,
+            max_speed_mps: MAX_SPEED_MPS,
+            ai: AI,
         },
         commands,
         ticks: 600,
@@ -292,6 +306,8 @@ pub fn orbit_coast() -> Scenario {
             pilots: vec![(PilotId(1), Some(1))],
             ai_pilots: Vec::new(),
             gravity_mu: MU,
+            max_speed_mps: MAX_SPEED_MPS,
+            ai: AI,
         },
         commands: vec![
             controls(600, 1, 1, -32767, 0, 0),
@@ -357,6 +373,8 @@ pub fn swarm_controls() -> Scenario {
             pilots,
             ai_pilots: Vec::new(),
             gravity_mu: MU,
+            max_speed_mps: MAX_SPEED_MPS,
+            ai: AI,
         },
         commands,
         ticks: TICKS,

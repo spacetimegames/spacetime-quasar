@@ -830,3 +830,48 @@ fn the_format_rules_for_segments_are_enforced() {
         );
     }
 }
+
+/// A replay carries its setup, so a hostile file reaches `Sim::new`. It must be refused
+/// when the replay is opened, never panic inside Rapier.
+#[test]
+fn a_replay_with_a_hostile_setup_is_refused_never_a_panic() {
+    use st_sim::SetupError;
+    let base = scenarios::solo_burn();
+    let hostile: Vec<(Box<dyn Fn(&mut st_sim::Setup)>, SetupError)> = vec![
+        (
+            Box::new(|s| s.ships[0].drag = -1.0e5),
+            SetupError::BadDynamics(1),
+        ),
+        (
+            Box::new(|s| s.ships[0].drag = -f64::MAX),
+            SetupError::BadDynamics(1),
+        ),
+        (
+            Box::new(|s| s.ships[0].max_accel = -1.0),
+            SetupError::BadDynamics(1),
+        ),
+        (
+            Box::new(|s| s.ships[0].max_turn_rate = -1.0),
+            SetupError::BadDynamics(1),
+        ),
+        (Box::new(|s| s.max_speed_mps = 0.0), SetupError::BadMaxSpeed),
+        (
+            Box::new(|s| s.max_speed_mps = -5.0),
+            SetupError::BadMaxSpeed,
+        ),
+        (Box::new(|s| s.ai.standoff = 0.0), SetupError::BadAiParams),
+        (Box::new(|s| s.ai.drift_ticks = 0), SetupError::BadAiParams),
+    ];
+    for (change, expected) in hostile {
+        let mut setup = base.setup.clone();
+        change(&mut setup);
+        let bytes = ReplayWriter::new(&header_for(&base), &setup, 0)
+            .unwrap()
+            .finish(0, 0)
+            .unwrap();
+        // `open` builds the simulation, so the refusal comes there.
+        assert!(
+            matches!(ReplayReader::open(&bytes, &ctx()), Err(ReplayError::Setup(e)) if e == expected)
+        );
+    }
+}

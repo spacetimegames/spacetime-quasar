@@ -9,7 +9,7 @@ use st_math::glam::{DQuat, DVec3};
 use st_rng::Stream;
 use st_time::Tick;
 
-use super::{FAR, MU, Scenario, controls_with};
+use super::{AI, FAR, MAX_SPEED_MPS, MU, Scenario, controls_with};
 use crate::command::{Command, PilotId};
 use crate::hull::{FIRE, HullPart, PartShape, Weapon};
 use crate::sim::{Setup, ShipInit};
@@ -136,6 +136,8 @@ pub fn physics_swarm() -> Scenario {
             pilots,
             ai_pilots: Vec::new(),
             gravity_mu: MU,
+            max_speed_mps: MAX_SPEED_MPS,
+            ai: AI,
         },
         commands,
         ticks: TICKS,
@@ -222,6 +224,8 @@ pub fn combat_60s() -> Scenario {
             pilots,
             ai_pilots,
             gravity_mu: MU,
+            max_speed_mps: MAX_SPEED_MPS,
+            ai: AI,
         },
         commands,
         ticks: TICKS,
