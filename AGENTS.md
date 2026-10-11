@@ -132,8 +132,9 @@ fine in benchmark and verification records. Use repo-relative paths or
 
 ## Working today
 
-`nix develop` gives the pinned toolchain. Docs check:
-`nix shell nixpkgs#asciidoctor -c asciidoctor --failure-level WARN -o /dev/null <file>.adoc`.
+`nix develop` gives the pinned toolchain and asciidoctor. Docs check:
+`nix develop -c asciidoctor --failure-level WARN -o /dev/null <file>.adoc`.
+Rendering to HTML for reading is fine: the output (`README.html`, `docs/**/*.html`) is git-ignored.
 
 A fresh clone has no `graft/INDEX.md` until `graft build` runs.
 

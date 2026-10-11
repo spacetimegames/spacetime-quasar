@@ -10,3 +10,7 @@ flake.nix.example
 /graft/
 /result
 /result-*
+
+# asciidoctor HTML rendered next to the AsciiDoc sources.
+/README.html
+/docs/**/*.html
