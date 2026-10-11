@@ -2,8 +2,10 @@
 //!
 //! These outputs are frozen. They were produced by an independent
 //! implementation of the documented algorithms (SplitMix64 finaliser, FNV-1a
-//! 64, Lemire bounded draws) and are checked on Linux, Windows, macOS and
-//! `wasm32` in CI, which shows the crate is bit-identical everywhere. If a
+//! 64, Lemire bounded draws) and currently run in CI on Linux, macOS and
+//! Windows. Execution on `wasm32` will come with the determinism harness
+//! (wasmtime on `wasm32-wasip1`, ADR 0008); until then the `wasm32` CI job
+//! only builds the crate. If a
 //! test here fails, the algorithm or a constant changed, which changes every
 //! outcome derived from a seed: that is a simulation-version change.
 
@@ -146,4 +148,15 @@ fn cursor_reproduces_golden() {
     assert_eq!(c.next_u64(), 0x2a41_88b5_4a9a_bc1b);
     assert_eq!(c.next_u64(), 0xe084_ff74_afc9_170a);
     assert_eq!(c.counter(), 2);
+}
+
+#[test]
+fn non_ascii_label_golden() {
+    // Labels hash their UTF-8 bytes, so non-ASCII text is well defined.
+    // Expected values come from an independent BigInt implementation.
+    let label = "\u{e9}conomie\u{2192}\u{706b}\u{661f}"; // "économie→火星"
+    assert_eq!(st_rng::label_hash(label), 0x135a_d508_bb29_075d);
+    let s = Stream::from_seed(1).derive_label(label);
+    assert_eq!(s.u64_at(0), 0x10b6_5c6f_df4b_08ea);
+    assert_eq!(s.u64_at(1), 0x3191_b73c_fd1e_a6be);
 }

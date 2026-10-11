@@ -48,10 +48,12 @@
 //! changes every outcome that depends on it. Once replays or saves exist this
 //! is a simulation-version change (see ADR 0008).
 //!
-//! * **Mixing:** the SplitMix64 output finaliser (Steele, Lea and Flood,
-//!   "Fast splittable pseudorandom number generators", OOPSLA 2014; the
-//!   constants are the `mix64` variant used by `java.util.SplittableRandom`
-//!   and published by Vigna at <https://prng.di.unimi.it/splitmix64.c>).
+//! * **Mixing:** the SplitMix64 output finaliser, which is Stafford's "Mix13"
+//!   variant of the MurmurHash3 64-bit finaliser (David Stafford, "Better Bit
+//!   Mixing", 2011) as used in Vigna's reference `splitmix64.c`
+//!   (<https://prng.di.unimi.it/splitmix64.c>). The generator it finalises
+//!   is from Steele, Lea and Flood, "Fast splittable pseudorandom number
+//!   generators", OOPSLA 2014.
 //!   Draw `n` of a stream with key `k` is `mix(k + (n + 1) * GAMMA)`, which is
 //!   exactly the `n`-th output of SplitMix64 seeded with `k`.
 //! * **Label hashing:** FNV-1a 64 over the label's UTF-8 bytes (offset basis
@@ -87,9 +89,11 @@
 //! # Platform behaviour
 //!
 //! The core is integer-only (wrapping `u64` arithmetic, one `u128` multiply
-//! for bounded draws) plus the exact float conversion above, so output is
-//! bit-identical on 32-bit and 64-bit targets, little- and big-endian, and
-//! `wasm32`. The crate is `#![no_std]`, contains no `unsafe`, no allocation,
+//! for bounded draws) plus the exact float conversion above, so output does
+//! not depend on pointer width or endianness. The golden vectors run in CI on
+//! Linux, macOS and Windows; execution on `wasm32` will come with the
+//! determinism harness (wasmtime on `wasm32-wasip1`, ADR 0008), and until then
+//! the `wasm32` job only builds the crate. The crate is `#![no_std]`, contains no `unsafe`, no allocation,
 //! and no panics on any input.
 
 #![no_std]
@@ -577,20 +581,32 @@ mod tests {
     }
 
     #[test]
-    fn rejection_path_is_exercised_and_stable() {
-        // With bound near 2^64 roughly half of first candidates are rejected,
-        // so this runs the retry sub-stream; results must be repeatable.
+    fn rejection_path_is_taken_and_uses_retry_stream() {
+        // With a bound just above 2^63 about half of first candidates are
+        // rejected. For each rejected counter the result must come from the
+        // retry sub-stream, not from the rejected first candidate.
         let s = Stream::from_seed(21);
         let bound = (1u64 << 63) + 12345;
+        let threshold = bound.wrapping_neg() % bound;
         let mut retried = 0;
         for c in 0..256 {
             let first = (s.u64_at(c) as u128) * (bound as u128);
-            if (first as u64) < bound.wrapping_neg() % bound {
-                retried += 1;
+            let got = s.below_at(c, bound);
+            assert!(got < bound);
+            if (first as u64) >= threshold {
+                assert_eq!(got, (first >> 64) as u64, "accepted at {c}");
+                continue;
             }
-            assert_eq!(s.below_at(c, bound), s.below_at(c, bound));
+            retried += 1;
+            let retry = s.child(DOMAIN_RETRY, c);
+            let accepted = (0..MAX_RETRIES)
+                .map(|a| (retry.u64_at(a) as u128) * (bound as u128))
+                .find(|p| (*p as u64) >= threshold)
+                .expect("a candidate is accepted within the cap");
+            assert_eq!(got, (accepted >> 64) as u64, "retried at {c}");
         }
-        assert!(retried > 0);
+        // Roughly half of 256 draws are rejected.
+        assert!((64..=192).contains(&retried), "retried {retried}");
     }
 
     #[test]
