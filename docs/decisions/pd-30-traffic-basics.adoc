@@ -1,0 +1,28 @@
+= PD-30: Traffic basics: four archetypes, medium density
+:description: Product decision PD-30
+
+* *Date:* 2026-10-11
+* *Resolves:* design backlog G9, basic part (SPAC-112)
+
+*Context.* Phase 2 needs AI archetypes and traffic density so systems feel inhabited.
+
+*Decision.*
+
+* The MVP archetypes are trader, pirate, patrol and escort.
+* Density is medium, with a per-system "busy" setting.
+* As placeholders, a quiet system has about 5–10 ships in range and a hub about 20–40. 200 ships is only the stress budget.
+* Ships visibly arrive and leave through the jump link.
+* Pirate frequency varies by system.
+* A richer role + faction + temperament model was considered and deferred. Archetypes stay data-driven so it can be added.
+
+*Alternatives considered.*
+
+* Sparse scripted traffic (_EV: Nova_): cheap, but systems feel empty.
+* Dense ambient traffic (_X4_, _Freelancer_): lively, but costly and harder to tune.
+
+*Consequences.*
+
+* Archetypes and per-system settings live in data files.
+* The numbers above are placeholders to tune during Phase 2.
+
+*Reference games.* _EV: Nova_, _X4_, _Freelancer_.

@@ -28,7 +28,7 @@ It states where the project stands; the linked pages hold the detail.
 | None.
 
 | Owner questions
-| G2, G5, G7 and G9 open, due before Phase 2.
+| G2, G5 (basic), G7 and G9 (basic) answered (PD-27 to PD-30). New questions needed before the Phase 3 save-format work are listed below.
 |===
 
 == What works
@@ -40,7 +40,7 @@ All of this is on `main`.
 * CI (GitHub Actions) runs 9 required checks: `fmt`, `test (linux-x86_64)`, `test (windows-x86_64)`, `test (macos-aarch64)`, `wasm32`, `msrv`, `deny`, `docs` and `nix`. See xref:../adr/0003-ci-design.adoc[ADR 0003].
 * `nix run github:spacetimegames/spacetime-quasar`, or `nix run` in a checkout, opens the visible window. `packages.default` is built with crane and wraps the Vulkan, Wayland, xkbcommon and X11 libraries through `RUNPATH`. `nix flake check` mirrors the CI gates that can run under Nix (fmt, nixfmt, clippy, test, bench build, doc, asciidoc, deny without advisories, wasm32); the `nix` CI job runs it.
 * Window: a visible window through `st-render` (wgpu on Vulkan, ADR 0005) that closes on close or Escape; the owner hands-on test passed on 2026-10-11 on NixOS with COSMIC on Wayland, on both the RTX 3080 Laptop GPU and the integrated Intel GPU (xref:try/phase-0.adoc#_result[test result], xref:../20-platforms/nixos-cosmic.adoc[platform notes]).
-* Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0005, the product decision records PD-01 to PD-26, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
+* Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0005, the product decision records PD-01 to PD-30, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
 
 == Next
 
@@ -69,15 +69,13 @@ Then the Phase 1 crates and tooling:
 
 Needed before Phase N means the answer must exist before that phase starts.
 
-* G2, controls (needed before Phase 2): devices and default bindings; target cycling; land/autopilot, hail and board keys.
-* G7, combat (needed before Phase 2): laser model (instant beam with overheat vs travelling bolts, undecided); lead indicator; shield regeneration; what armour regions do; disable-and-board vs destroy; player death; escorts.
-* G5, economy (basic needed before Phase 2, full needed before Phase 3): price formula, production and consumption, player impact, cargo units, starting credits and ship, commodity list, illegal goods.
-* G9, traffic (basic needed before Phase 2): AI archetypes and traffic density per system.
+* Needed before the Phase 3 save-format work: should an older build open a save or design made by a newer build? ADR 0010 currently refuses.
+* Needed before the Phase 3 save-format work: can a design that fails the current rules be opened in the shipyard for repair?
 * Later, needed before Phase 3: G4 navigation and jumps, G6 factions and law, G8 missions, G11 saves and sessions. Needed before Phase 5: G14 audio direction.
 * Licence: deferred by the owner. All rights reserved meanwhile. To be decided at the first crate publication review or the MVP release, whichever comes first (open point #7).
 * Open point #15, the native X11 test session, is parked until Phase 6.
 
-G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
+G2, G5 (basic), G7 and G9 (basic) are answered (PD-27 to PD-30). G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
 
 == Where to start
 
