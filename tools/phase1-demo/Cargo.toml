@@ -1,0 +1,22 @@
+[package]
+name = "phase1-demo"
+description = "Phase 1 CLI demo: hot-reloads the PD-31 speed envelope and prints figures plus a replay hash."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+st-data = { path = "../../crates/st-data" }
+# This is the dev tool that turns hot reload on (ADR 0010, "Hot reload"). The
+# game binary does not depend on st-game, so release and Nix packages carry no
+# watcher.
+st-game = { path = "../../crates/st-game", features = ["hot-reload"] }
+st-math = { path = "../../crates/st-math" }
+st-platform = { path = "../../crates/st-platform", features = ["hot-reload"] }
+st-sim = { path = "../../crates/st-sim" }
+st-time = { path = "../../crates/st-time" }
+
+[lints]
+workspace = true

@@ -1,0 +1,127 @@
+= Try Phase 1
+:description: A hands-on checklist for the Phase 1 CLI demo: edit a speed or distance and see what it means, plus a replay hash.
+
+Phase 1 has no window and no ship.
+What it can do is let you feel the speed and scale numbers of xref:../../decisions/pd-31-speed-and-scale-envelope.adoc[PD-31] before Phase 2 shows a ship: you edit a number in a text file, and a terminal shows what it means in everyday terms.
+It also proves two engineering points: a bad edit never breaks the running values, and the same data always gives the same replay hash.
+This page is a checklist you can follow without engineering knowledge.
+
+== Start it
+
+You need the repository checked out (up to date with `main`).
+Open a terminal in the repository folder and run one command:
+
+[source,sh]
+----
+nix develop -c cargo run -p phase1-demo
+----
+
+The first run builds the program and takes a few minutes.
+Later runs start in seconds.
+It keeps running and watching the data file until you press Ctrl-C.
+
+This is not `nix run`: the file watcher is a development tool and is left out of every release and Nix package (xref:../../adr/0010-data-schema-versioning.adoc[ADR 0010]).
+The game program does not contain it.
+
+To check that it starts and stops by itself after three seconds, add `-- --exit-after-ms 3000`:
+
+[source,sh]
+----
+nix develop -c cargo run -p phase1-demo -- --exit-after-ms 3000
+----
+
+== What you should see
+
+A block of text, headed `started (data generation 0)`, with four parts:
+
+* *validated values*: the numbers from the file `assets/space_envelope/pd-31.ron`, as the program understood them.
+* *what that feels like*: the same speeds in km/h, compared with a walking person, a car, a jet airliner, the speed of sound, a rifle bullet and the International Space Station; how long it takes to reach the next body, the edge of the system and the other side; and the system radius compared with a marathon, Italy, the Earth and the Moon.
+* *replay*: two test ships fly from one edge of the system to the other, one at normal speed and one at cruise speed, in the deterministic simulation. The last line is the *replay hash*, 16 hex digits.
+* *data hash*: a fingerprint of the file's meaning.
+
+With the starting numbers, the replay hash on the reference dev machine is `a9089ca937be4c77`.
+The trip times at normal speed to the next body are 1 min 00 s to 2 min 00 s, which is the "1 to 2 minutes" of PD-31.
+
+== What to try
+
+Edit `assets/space_envelope/pd-31.ron` in any editor and save.
+The terminal answers within about a second.
+Every value has a short comment above it that says what it is.
+
+* [ ] Start it. Good: the block above appears and the terminal prompt does not come back.
+* [ ] Press Ctrl-C, start it again. Good: the replay hash is the same as the first time. Same data, same hash.
+* [ ] Change `normal_speed_mps: 1000.0` to `500.0` and save. Good: a new block headed `RELOADED (data generation 1)` shows 500 m/s, every time doubled, and a new replay hash (`24fcb49460d0ccec` on the reference dev machine).
+* [ ] Change it back to `1000.0` and save. Good: the first hash returns.
+* [ ] Change the jet airliner's `mps: 250.0` to `300.0` and save. Good: the comparison lines change, and the replay hash does not, because the yardsticks are only for the printout.
+* [ ] Change `normal_speed_mps` to `-5.0` and save. Good: the block is headed `EDIT REJECTED`, the values shown are marked `OLD values`, and at the bottom a line starting `error[validation]` names the file, the line and the column.
+* [ ] Wait ten seconds without touching anything. Good: the same error is shown again under `STILL WAITING`. It stays until you fix the file.
+* [ ] Break the file on purpose, for example delete a comma, and save. Good: an `error[syntax]` line with the file, line and column. The old values are still shown.
+* [ ] Fix the file and save. Good: `RELOADED` appears, the error is gone and the values are the new ones.
+* [ ] Press Ctrl-C. Good: the prompt comes back, with no error message.
+* [ ] Feel the numbers (the main point of this test). Read the "what that feels like" lines and try other values. Do the speed figures feel right? Do 1 to 2 minutes between bodies, about 33 minutes from the centre to the edge at normal speed and 3 minutes 20 seconds at cruise speed sound like the game you want? Write down your preferred numbers in the table below.
+
+When you are done, put the file back:
+
+[source,sh]
+----
+git checkout assets/space_envelope/pd-31.ron
+----
+
+== Your numbers
+
+These are the values in PD-31, which stay provisional until you confirm them.
+Fill in the right column with the numbers you prefer, or write "keep".
+
+[cols="3,2,2",options="header"]
+|===
+| Value in the file | Starting value | Your preferred value
+
+| `normal_speed_mps` (normal speed, m/s)
+| 1000
+|
+
+| `cruise_multiplier` (cruise speed divided by normal speed)
+| 10
+|
+
+| `system_radius_km` (centre to system edge, km)
+| 2000
+|
+
+| `body_spacing_km` `min` and `max` (distance between bodies, km)
+| 60 and 120
+|
+
+| `acceleration_mps2` (how fast the demo's test ships speed up, m/s^2; demo only)
+| 100
+|
+|===
+
+If a value you want is refused, the error tells you the rule.
+For example the system radius cannot exceed 8,388 km, the limit of the simulation's coordinates (xref:../../adr/0007-large-world-coordinates.adoc[ADR 0007]).
+
+== What to report back
+
+For each item above, tell us in plain words either "OK" or what happened.
+Also paste any text the terminal printed that looks wrong, and the numbers from the table.
+No technical detail is needed.
+
+== Result
+
+Owner hands-on test: pending.
+
+The agent runs below were on the reference dev machine (Linux x86_64, NixOS), 2026-10-11.
+
+* Run it, edit a value, make a bad edit, wait for the reminder, fix the file, and stop it with SIGINT (exit status 130): done by an agent. Transcript in the SPAC-108 pull request.
+* The replay hash of the starting values is `a9089ca937be4c77`, and the same value comes back after an edit and the edit back: done by an agent.
+* The tests of the `phase1-demo` package pin the same hash for the same numbers. They pass on Linux and on `wasm32-wasip1` under wasmtime (agent runs). The Windows and macOS test jobs run the same tests; their result is in the pull request.
+
+== Known limits
+
+* The demo is a terminal program. There is no ship and no window; those are Phase 2.
+* The trip times in "what that feels like" assume the speed is held the whole way. The replay includes speeding up and slowing down, so its crossing times are a little longer.
+* A replay that would take more than three simulated hours (for example a very low speed) is not run. The figures are still printed, with the reason.
+* If a save is caught half-written, the demo can report `the file could not be read`. It tries again only when the file changes again, so save once more.
+* If you save two data files at once and one is bad, nothing changes until the bad one is fixed; then both apply. There is only one data file today.
+* There is no `q` key: reading the keyboard without blocking needs a thread, and threads are provided through `st-platform`, which has none yet. Use Ctrl-C.
+* Only Linux was used. Windows and macOS are not tested by hand yet.
