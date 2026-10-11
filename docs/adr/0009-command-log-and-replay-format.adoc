@@ -1,0 +1,823 @@
+= ADR 0009: Command log and replay format
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted. The replay version policy (version-locked replays) is an
+assumption pending owner confirmation; see <<product-questions>>.
+
+== Date
+
+2026-10-11
+
+== Context
+
+The charter and the earlier decisions bind this decision:
+
+* "The sim advances only through commands (seed + per-tick command log);
+  replay and network play are the same mechanism."
+  (xref:../decisions/pd-04-multiplayer-is-not-supported.adoc[PD-04])
+* "The player is not special: the sim drives N pilots, each fed by an input
+  source (local device, AI, replay, later network)." `st-sim` stays
+  headless and could later run as a dedicated server.
+* "Saves separate universe state from pilot state." The save format gets its
+  own ADR in Phase 3. This ADR defines only what saves would reuse.
+* The acceptance test (xref:../decisions/pd-06-determinism.adoc[PD-06]):
+  given a seed and a command log, 60 s of combat produce a world-state hash.
+  CI runs it on Linux x86_64, Windows x86_64, macOS aarch64 and wasm32 and
+  compares the hashes across platforms.
+* xref:../decisions/pd-05-llm-usage.adoc[PD-05]: no LLM at runtime. A later
+  "narrative provider" would record its outputs as command-log inputs, so
+  replays stay deterministic. The format must not block that.
+* Browser-ready (xref:../decisions/pd-11-browser-target.adoc[PD-11]): core
+  crates do no file system access; I/O goes through `st-platform`.
+  Native-only code is `cfg`-gated.
+* `st-*` crates are designed as if publishable: no panics on misuse.
+  `unsafe_code` is denied in the workspace.
+* xref:0008-determinism-implementation.adoc[ADR 0008] fixes what this ADR
+  plugs into:
+** `Sim::new(setup, seed: u64)`, `Sim::step(&mut self, commands: &[Command]) -> Result<(), StepError>`
+   (exactly one tick), `Sim::tick() -> u64` and
+   `Sim::state_hash() -> Result<u64, HashError>`.
+** `state(t + 1) = step(state(t), commands stamped t)`. Within a tick,
+   commands apply first, in ascending (pilot id, per-pilot sequence number)
+   order, before AI and physics.
+** Commands carry integers or bit-exact f64. Analog input is quantised by
+   the input source. One `u64` world seed; no other entropy.
+** Every id is a `u64`. The state hash (FNV-1a 64, format version 1) records
+   per pilot the sequence number of the last applied command. Checkpoints are
+   every 120 ticks and at the final tick.
+** Bit-identity holds within one build, not across builds. A replay header
+   records the hash format version, a simulation version and the
+   xref:0010-data-schema-versioning.adoc[ADR 0010] data-set hash.
+** A snapshot must restore everything a step reads, Rapier's internal caches
+   included. Rapier's `serde-serialize` feature was named as the candidate
+   and left to this ADR, as was the feature itself in
+   xref:0007-large-world-coordinates.adoc[ADR 0007].
+** The harness (`tools/determinism`, SPAC-76) accepts replay files as
+   scenarios once this ADR exists; the scenario `combat-60s` is driven by
+   such a file.
+* ADR 0010 offers the envelope (`kind`, `version`, `data`), the `Schema`
+  migration chain, the compatibility policy for player-held kinds, and the
+  BLAKE3 data-set hash. If this format is binary, it should still carry a
+  `kind` and a `version`. ADR 0010 asks that data changed during a recorded
+  session enter the simulation only through the command path, or that a
+  reload restart the simulation.
+* xref:0006-math-library-boundary.adoc[ADR 0006] leaves the encoding of
+  input commands (`st-game` turns device input into commands) to this ADR.
+* xref:../decisions/pd-27-controls.adoc[PD-27] (keyboard and mouse, a combat
+  mode in which the ship turns toward the mouse) and
+  xref:../decisions/pd-01-flight-model.adoc[PD-01] (planar flight) shape
+  the first command kinds.
+
+=== Facts verified on 2026-10-11
+
+From the published source of `rapier3d-f64` 0.36.1, and from a scratch crate
+(not committed) built with the pinned Rust 1.99.0 from the repository's dev
+shell on Linux x86_64. The crate used `rapier3d-f64` 0.36.1 with the
+ADR 0007 features (`dim3`, `f64`, `alloc`, `enhanced-determinism`).
+
+* *What a physics world is made of.* `PhysicsPipeline::step` takes the
+  gravity, the `IntegrationParameters`, and mutable references to
+  `IslandManager`, `BroadPhaseBvh` (the `DefaultBroadPhase` alias),
+  `NarrowPhase`, `RigidBodySet`, `ColliderSet`, `ImpulseJointSet`,
+  `MultibodyJointSet`, `SoftBodySet` and `CCDSolver`, plus hooks and an
+  event handler. All of these types derive `Clone`.
+* `PhysicsPipeline` does not implement `Clone`. Its documentation says it
+  holds only workspace buffers and that a new one can be created at any
+  time.
+* *Clone continuity.* The scene had 64 bodies, each with one compound
+  collider of three parts and explicit mass properties. It used planar
+  `LockedAxes`, CCD on every other body, no gravity, and per-tick impulses
+  derived statelessly from the tick and body index. It ran at 120 Hz, and
+  100 contact pairs were active at tick 300. The world was cloned at tick
+  300 and continued with a new `PhysicsPipeline`. Positions, rotations,
+  velocities and sleep flags then matched the uninterrupted run bit for bit
+  at every 60-tick checkpoint up to tick 1,200.
+* *Caches matter.* A second run rebuilt the world at tick 300 from body state
+  alone: same poses, velocities, colliders and mass properties, but a new
+  broad phase, narrow phase and island manager. It diverged from the
+  uninterrupted run at the first checkpoint after the rebuild (tick 360).
+* *Rapier's `serde-serialize`.* The feature enables Rapier's `std` feature as
+  well as `nalgebra/serde-serialize`, `parry3d-f64/serde-serialize` and
+  `arrayvec/serde`. It added 5 packages to the tree beyond `serde` itself:
+  `ena`, `matrixmultiply`, `rawpointer`, `serde_arrays` and `slab`.
+  Rapier's bodies carry `user_data: u128`, so `ron` 0.12.2 without its
+  `integer128` feature (the ADR 0010 configuration) refuses to serialise the
+  world ("u128 is not supported"). With `integer128` the RON round trip
+  worked: the restored world continued bit-identically to tick 1,200. The
+  RON text took 979,163 bytes for the 64 bodies. The tick-300 state hash was
+  the same with and without the feature (one platform only).
+* *Re-simulation speed* (from ADR 0008, measured): the 200-ship
+  `physics-swarm` probe runs 7,200 ticks in 1.5 to 1.7 s natively and 3.4 to
+  5.3 s under wasmtime, in release builds. That is 4,200 to 4,800 ticks per
+  second natively and 1,350 to 2,100 under wasm.
+
+=== Assumed, not verified
+
+* Clone continuity holds on Windows x86_64, macOS aarch64 and wasm32. It is
+  the same code, and the `snapshot_continuity` test below checks it in CI
+  once SPAC-76 runs.
+* Command-log sizes below are estimates from the encoding, not
+  measurements. The input layer does not exist yet.
+* FNV-1a 64 is an adequate chunk checksum for accidental corruption
+  (truncation, bit flips, text-mode transfer). Deliberate tampering is not
+  in the threat model.
+
+== Decision
+
+=== Overview
+
+[cols="1,4",options="header"]
+|===
+| Term | Meaning
+
+| Command
+| One input to the simulation for one pilot at one tick. The only way
+  anything outside `st-sim` changes simulation state.
+
+| Command log
+| The seed, the setup, and every command the simulation accepted, in tick
+  order. Replaying it reproduces the session bit for bit within one
+  simulation version.
+
+| Replay file
+| A command log on disk: a small text header that stays readable forever,
+  then a binary, version-locked body with checkpoint hashes.
+
+| Snapshot
+| An exact copy of a running simulation, Rapier caches included.
+  In memory it is `Sim::clone()`. It is version-locked and is not a save.
+
+| Save
+| Upgrade-safe universe and pilot state as ADR 0010 schema types (Phase 3
+  save ADR). Loading one starts a new deterministic history.
+|===
+
+=== Commands
+
+==== Shape
+
+The types live in `st-sim` (module `command`). Names are binding; private
+details may change in review.
+
+[source,rust]
+----
+/// A pilot. 0 is reserved for the session (see below); real pilots start at 1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PilotId(pub u64);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Command {
+    /// The tick this command applies in: `state(tick + 1) = step(state(tick), ..)`.
+    pub tick: u64,
+    pub pilot: PilotId,
+    /// Strictly increasing per pilot over the whole session; gaps allowed.
+    pub seq: u64,
+    pub kind: CommandKind,
+}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub enum CommandKind {
+    /// Tag 1. Held control state, sent when it changes (sample and hold).
+    Controls(ControlState),
+    // Further kinds are added by the PRs that introduce the feature.
+}
+----
+
+* *Closed enum, explicit tags.* `CommandKind` is one Rust enum. Each variant
+  has an explicit `u32` wire tag in a table in `st-sim`. A tag is never
+  reused, even after its variant is removed. Ranges: 1 to 999 are pilot
+  kinds, 1000 to 1999 session kinds, 2000 to 2999 external-provider kinds.
+* *Reserved now, not implemented:* 1000 `AddPilot`, 1001 `RemovePilot`,
+  1002 `SetController` (handover between AI and an external source), 1003
+  `DataSetChange` (see <<data-reload>>), and 2000 `Narrative` (PD-05, see
+  <<narrative>>).
+* *Payloads have no version of their own.* Replays are version-locked
+  (<<version-policy>>), so the simulation version identifies every
+  payload's layout.
+* *Session commands.* Pilot 0 is the session: the authority that adds and
+  removes pilots, hands control over, and feeds external providers. Session
+  kinds are valid only from pilot 0, and pilot kinds only from pilots 1 and
+  up. Because 0 sorts first, session commands of a tick apply before pilot
+  commands. Changes to the set of pilots take effect for validation from
+  the next tick.
+
+==== Adding a command kind
+
+. Add the variant and its payload type in `st-sim`, and take the next free
+  tag in its range.
+. Write its wire encoding and decoding (<<wire>>) and its validation, and
+  add a sample to the wire golden test.
+. Bump `SIM_VERSION` and its pin (<<version-policy>>).
+. Produce it from an input source (the `st-game` input mapping, the harness
+  driver, or a session source).
+
+No migration is written and the file container does not change.
+
+==== Values
+
+* *Quantised at the source.* Commands carry integers wherever possible:
+** analog axes are `i16` in `-32767..=32767` (`-32768` is invalid). The
+   simulation converts them with `axis as f64 / 32767.0`, a correctly
+   rounded division;
+** directions in the plane are `u32` binary angles (2^32^ units per turn,
+   in the system frame);
+** held buttons form a `u32` bit set;
+** references to things are ids (`u64`).
+* An f64 field is allowed when an integer cannot express the value. It is
+  carried bit-exact. NaN and infinities are invalid.
+* *First kind, `Controls`* (fields final in the Phase 2 flight PR):
+  `thrust: i16` (positive forward, negative brake), `strafe: i16`,
+  `turn: i16`, `aim: Option<u32>` (the combat-mode heading toward the
+  mouse, PD-27), `buttons: u32` (primary, secondary, countermeasures,
+  cruise, and so on). The simulation keeps each pilot's last `ControlState`
+  as pilot state, so it is hashed. An input source sends `Controls` only when
+  the quantised state changes.
+* Edge actions (next target, land, jump, board, hail) are separate pilot
+  kinds, added by the PRs that introduce them.
+* Data the shipped data set does not contain is carried by value: for
+  example a player's ship design that enters the simulation goes into a
+  payload as the design file's bytes, and `st-sim` parses it with `st-data`,
+  which is deterministic. A replay therefore depends only on its own bytes
+  and on the shipped data set named in its header.
+
+==== Validation and stepping
+
+* `step` requires every command to have `tick == sim.tick()` and the slice to
+  be sorted strictly ascending by (pilot, seq). `st_sim::command::sort`
+  sorts a slice that way.
+* `step` validates the whole slice before it changes anything. On error,
+  state is unchanged and the error names the index of the offending
+  command. The caller drops that command and steps again.
+* `StepError` variants, beyond those ADR 0008 implies: `WrongTick`,
+  `NotSorted`, `UnknownPilot`, `StaleSequence` (seq not above the pilot's
+  last applied), `NotExternal` (pilot is controlled inside the simulation),
+  `WrongSource` (session kind from a pilot, or the reverse), `InvalidPayload`,
+  `TooManyCommands`.
+* *Limits*, checked by `step`, so a live session can never produce a log it
+  cannot record: at most 1,024 commands per tick and at most 1 MiB per
+  command payload.
+* Only commands that `step` accepted are recorded.
+
+==== Who produces commands
+
+[cols="2,2,1,4",options="header"]
+|===
+| Source | Where | Logged | Notes
+
+| Local device
+| `st-game` input mapping
+| yes
+| Device events from `st-platform`, through the bindings (PD-27), to
+  quantised commands for the locally controlled pilots. It stamps them with
+  the next tick to step (`sim.tick()`) and its per-pilot sequence counter,
+  which starts at the pilot's last applied sequence plus one.
+
+| AI and autopilot
+| inside `st-sim`, during `step`
+| no
+| A pure function of state and seed, so replays recompute it. Pilots
+  controlled inside the simulation reject external commands. An autopilot
+  that a player engages is a pilot mode set by a command; the pilot stays
+  external.
+
+| Replay
+| `st_sim::replay` reader
+| (already logged)
+| Yields each tick's commands from a file. A session cannot tell it from a
+  live source.
+
+| Scripted driver
+| `st_sim::scenarios`, the harness
+| yes
+| Seeded test input for the harness scenarios.
+
+| Network (later)
+| a future netcode crate
+| yes
+| Remote pilots' commands, encoded exactly as in the file (<<multiplayer>>).
+
+| External provider (later)
+| session source
+| yes
+| A narrative provider's outputs (PD-05).
+|===
+
+The per-tick loop is small: collect commands from the sources, sort, `step`,
+record, and checkpoint every 120 ticks. It lives in `st-game` for the game and
+in the harness for tests. A dedicated server would move it into an `st-sim`
+`session` module.
+
+[[wire]]
+=== Wire encoding of commands
+
+One codec, `st_sim::command::wire`, is used by replay files and, later, by
+network messages. It is hand-written, with no serde, so field order and
+tags are explicit in code.
+
+* *Varint:* unsigned LEB128, at most 10 bytes for a `u64`. Overlong
+  (non-minimal) encodings and overflow are errors, so each value has exactly
+  one encoding.
+* *Payload fields:* integers are fixed-width little-endian. `bool` is one
+  byte, 0 or 1. `f64` is `to_bits()` little-endian, bit-exact (unlike the
+  state hash, `-0.0` is kept), and NaN and infinities are errors. An
+  `Option` is a tag byte (0 or 1) followed by the value. Byte strings and
+  UTF-8 strings are a varint length followed by the bytes. A sequence is a
+  varint count followed by its elements. A nested enum is a `u32`
+  little-endian tag followed by its payload.
+* *A command in a tick record:* `pilot` varint, `seq` varint, `tag` varint,
+  payload length varint, then the payload. The `seq` field holds the
+  difference from the same pilot's previous command in the same file (at
+  least 1), or the absolute value for that pilot's first command in the
+  file. A decoder must consume the payload exactly: trailing bytes are an
+  error.
+* `Controls` is 11 to 15 payload bytes. With framing, one pilot changing
+  controls on every tick costs about 20 bytes per tick: 2.4 KB/s, or
+  8.6 MB/h at worst. Held controls cost nothing. (Estimate; see Assumed.)
+
+=== Replay file format
+
+==== Layout
+
+A replay file has the extension `.stqreplay`. It is an 8-byte magic
+followed by chunks.
+
+* *Magic:* `89 53 54 51 52 0D 0A 1A` (`\x89STQR\r\n\x1a`). The first byte
+  is not ASCII and the CR LF pair catches text-mode transfers, as in PNG.
+* *Chunk:* `tag` (4 ASCII bytes), `len` (`u32` little-endian, the payload
+  length), the payload, then `check` (`u64` little-endian): FNV-1a 64 (the
+  ADR 0008 implementation) over the tag, length and payload bytes. A
+  checksum mismatch is reported as corruption, never as a divergence.
+* *Chunk order:* `HEAD` once, `SETP` once, then any number of `SEGM` chunks
+  in tick order, then `END_` once and last. Any other tag is an error in
+  container version 1.
+* *Frozen prefix.* The magic, followed by the `HEAD` chunk's framing (tag,
+  length, payload, check), keeps this layout in every future container
+  version. That way every later build can read every header.
+
+==== `HEAD`: an ADR 0010 envelope
+
+The payload is UTF-8 RON, at most 64 KiB: an ADR 0010 envelope of kind
+`replay`, loaded with the `st-data` loader (header pass, strict pass,
+migrations, diagnostics).
+
+[source,ron]
+----
+(
+    kind: "replay",
+    version: 1,
+    data: (
+        sim_version: 1,
+        state_hash_version: 1,
+        data_set_hash: "b3:0f3a…",  // 64 hex digits; ADR 0010 data-set hash of the shipped data
+        seed: 6148914691236517205,
+        start_tick: 0,
+        build: "spacetime-quasar 0.1.0",  // informational; never compared
+        local_pilots: [1],  // informational; the default pilot for the viewer to follow
+    ),
+)
+----
+
+* `replay` is a *player-held kind* under ADR 0010: every later build reads
+  every header version that has been in a public build, through header
+  migrations. The envelope `version` covers both the header schema and the
+  container framing. Compression, a new chunk type or a framing change bumps
+  it.
+* `sim_version`, `state_hash_version` and `data_set_hash` decide whether the
+  body can be played (<<version-policy>>). `seed` and `start_tick` duplicate
+  what `SETP` and `Sim::new` establish, for display and tools.
+  `local_pilots` serves presentation only; the simulation never sees it.
+* The header carries no wall-clock time, so recording the same session twice
+  gives the same bytes.
+* `st-sim` writes the header through an envelope writer in `st-data`. It
+  serialises (kind, version, value) with `ron`, without struct names, and
+  its output must load back through the loader with the same content hash.
+  This is an addition to the `st-data` API, needed equally by the shipyard
+  for designs and by saves.
+
+==== Body chunks: version-locked
+
+Each payload uses the wire rules above.
+
+`SETP`::
+  `start_hash` (`u64`, the state hash right after `Sim::new`), then the
+  encoded `SimSetup`: everything `Sim::new` takes except the shipped data
+  set, which the header names. Its layout belongs to `st-sim` and follows
+  `SIM_VERSION`.
+`SEGM`::
+  `first_tick` (`u64`), `tick_count` (`u32`), `record_count` (varint),
+  the records, then `end_hash` (`u64`), the state hash when
+  `sim.tick() == first_tick + tick_count`. A record is a tick delta (varint;
+  for the first record, the offset from `first_tick`; after that, the
+  difference from the previous record's tick, at least 1), a command count
+  (varint, at least 1), then the commands in (pilot, seq) order. Ticks with
+  no commands have no record. Segments end where the absolute tick is a
+  multiple of 120 and at the final tick, so `end_hash` values are exactly
+  the ADR 0008 checkpoints. A segment with no records still carries its
+  hash.
+`END_`::
+  `final_tick` (`u64`), `final_hash` (`u64`) and `segment_count` (`u64`).
+  A file without `END_` is a truncated recording.
+
+==== Properties and limits
+
+* *Canonical.* One command log has exactly one byte encoding. Write, read
+  and write again gives identical bytes, and the harness compares the bytes
+  across platforms.
+* *No compression in version 1.* The worst case is under 10 MB/h for one
+  human pilot (estimate). Revisit with Phase 2 measurements. If real
+  sessions exceed 10 MB/h, a pure-Rust codec, admitted under
+  xref:0002-dependency-policy.adoc[ADR 0002], is added per chunk with a
+  container version bump.
+* *No panics, bounded work.* The reader works on a byte slice already in
+  memory. The caller supplies a size limit (default 256 MiB). Every length
+  and count is checked against the bytes remaining before anything is
+  allocated. Malformed input of any kind returns `ReplayError`.
+* *Streaming and crash safety.* The writer keeps one open segment. It emits
+  each completed chunk as bytes that the session hands to `st-platform` to
+  append. A crash loses at most the last second. Reading a truncated file
+  returns every complete segment and then `ReplayError::Truncated`, with the
+  last complete tick, so it plays up to there.
+* *I/O.* `st_sim::replay` does no I/O and compiles for every target.
+  `st-platform` stores and loads the bytes: files on native targets,
+  browser storage on the web. The harness, a tool, uses `std::fs`.
+
+==== API sketch (`st_sim::replay`)
+
+[source,rust]
+----
+pub const MAGIC: [u8; 8] = *b"\x89STQR\r\n\x1a";
+
+/// Reads only the frozen prefix; works for files from any build.
+pub fn read_header(bytes: &[u8]) -> Result<ReplayHeader, ReplayError>;
+
+pub struct ReplayWriter { /* .. */ }
+impl ReplayWriter {
+    /// Emits magic, HEAD and SETP. `start_hash` is `sim.state_hash()` after `Sim::new`.
+    pub fn new(header: &ReplayHeader, setup: &SimSetup, start_hash: u64) -> Result<Self, ReplayError>;
+    /// Records the commands `step` accepted at `tick`, in step order.
+    pub fn push_tick(&mut self, tick: u64, commands: &[Command]) -> Result<(), ReplayError>;
+    /// Closes the open segment at a checkpoint tick with its state hash.
+    pub fn checkpoint(&mut self, tick: u64, state_hash: u64) -> Result<(), ReplayError>;
+    /// Drains completed chunks for `st-platform` to append.
+    pub fn take_bytes(&mut self) -> Vec<u8>;
+    pub fn finish(self, final_tick: u64, final_hash: u64) -> Result<Vec<u8>, ReplayError>;
+}
+
+pub struct ReplayReader<'a> { /* .. */ }
+impl<'a> ReplayReader<'a> {
+    /// Checks magic, header, versions and data set; indexes segment offsets.
+    pub fn open(bytes: &'a [u8], expect: &PlayContext) -> Result<Self, ReplayError>;
+    pub fn header(&self) -> &ReplayHeader;
+    pub fn setup(&self) -> &SimSetup;
+    pub fn segment(&self, index: usize) -> Result<Segment<'a>, ReplayError>;
+}
+----
+
+`PlayContext` holds the running build's `SIM_VERSION`, its state hash
+version and the loaded data set's hash. Playback steps a `Sim` through the
+segments and compares each `end_hash` with `state_hash()`
+(<<divergence>>).
+
+[[version-policy]]
+=== Version policy
+
+*Assumption, pending owner confirmation:* replays are *version-locked*. A
+replay plays only in a build with the same simulation version as the build
+that recorded it. Saves are upgrade-safe under ADR 0010; a replay is not a
+save. ADR 0007 already lists this as an open product question.
+
+* `st_sim::SIM_VERSION: u32` starts at 1 with the first `st-sim` that writes
+  replays. It is bumped by any PR that:
+** regenerates `tools/determinism/reference.txt` because results changed;
+** adds, removes or changes a command kind, its payload or encoding, or the
+   `SimSetup` encoding;
+** changes the `st-rng` algorithm;
+** changes the version of a simulation dependency in `Cargo.lock` (the
+   ADR 0008 upgrade checklist).
+* *Pin.* `tools/determinism/sim-version.txt` is append-only. Each line is
+  `<sim version> <FNV-1a 64 of reference.txt> <FNV-1a 64 of the wire golden bytes>`,
+  where the wire golden bytes are a fixed sample of every command kind from
+  `st_sim::command::wire::golden_bytes()`. The test `sim_version_pin` runs on
+  every platform and fails unless the last line matches `SIM_VERSION` and
+  both current hashes. A behaviour or encoding change therefore cannot merge
+  without touching the pin. Review checks that the change adds a line rather
+  than editing one.
+* *Opening a replay*, in order:
+. magic, else `not-a-replay`;
+. the header envelope through `st-data`: wrong kind, `version-too-new`
+  ("made by a newer build") and migration of older headers;
+. `sim_version` equal to `SIM_VERSION` and `state_hash_version` equal to 1.
+  Otherwise the error names the recording build, for example: "Recorded with
+  spacetime-quasar 0.3.0 (simulation version 7). This build plays simulation
+  version 9 only.";
+. `data_set_hash` equal to the loaded shipped data set's hash, else
+  `data-set-mismatch`;
+. `SETP`: build the `Sim`, then check `start_tick` and `start_hash`.
+* `SIM_VERSION` is not part of the state hash, so bumping it alone does not
+  change the reference file.
+* *What the alternative costs.* Replays that keep playing across versions
+  need one of the following:
+** every simulation version's behaviour kept alive and selectable by
+   version: every balance change, physics fix and dependency update
+   becomes a branch kept forever, and the harness needs a reference per
+   version;
+** old simulation builds shipped alongside new ones;
+** a recorded state stream instead of commands. That is version-portable,
+   but at about 100 bytes per ship per tick it costs megabytes per second
+   uncompressed, and it no longer verifies determinism.
+
+Each costs more than the feature is worth before the MVP. Any one can be
+added later behind the same header. Lockstep games commonly lock replays
+to the recording version; _Factorio_ does.
+
+=== Snapshots and seeking
+
+==== In-memory snapshots are `Sim::clone()`
+
+* `Sim` implements `Clone`. The implementation clones all simulation state
+  and the full Rapier world: `RigidBodySet`, `ColliderSet`, `IslandManager`,
+  `BroadPhaseBvh`, `NarrowPhase` (contact manifolds and warm-start
+  impulses), `ImpulseJointSet`, `MultibodyJointSet`, `SoftBodySet`,
+  `CCDSolver` and `IntegrationParameters`. It creates a new
+  `PhysicsPipeline`, because that type is not `Clone` and holds only
+  workspace. This is verified to continue bit-identically (Facts).
+* `Sim` keeps no state outside itself: no globals, no thread-locals, nothing
+  shared mutably. Immutable shared data (`Arc` of the data set) is allowed.
+* Rebuilding a world from body state is not a snapshot; it diverges at the
+  next checkpoint (Facts).
+* *Test* (the one ADR 0008 asks for): `snapshot_continuity` in
+  `tools/determinism` runs on every platform. For each scenario it clones
+  the `Sim` at tick 240, continues both to tick 600, and requires equal
+  checkpoint hashes.
+* Uses: seeking, client-side rollback later (<<multiplayer>>), and quick
+  "try again" restarts if gameplay ever wants them.
+
+==== Persisted snapshots: deferred
+
+Nothing in version 1 writes a snapshot to disk. The first feature that needs
+one (late join, snapshots inside replay files, or a save that also carries
+an exact snapshot) decides its encoding by ADR, starting from these findings:
+
+* Rapier's `serde-serialize` reaches every cache that matters, but it turns
+  on Rapier's `std` feature. That needs the ADR 0008 leak detector run and
+  cross-platform hashes before admission.
+* `ron` with the ADR 0010 features cannot serialise the world (`u128`), and
+  RON costs about 15 KB per body. A binary serde format is the likely
+  choice, and it is a new dependency under ADR 0002.
+* `serde-serialize` stays off until then (ADR 0007 left it to this ADR).
+
+==== Saves are not snapshots
+
+* A snapshot is exact but version-locked: Rapier's private cache layout
+  changes between versions. A save must be upgrade-safe (ADR 0010).
+  Therefore a save stores universe and pilot state as schema types and
+  never Rapier caches.
+* Loading a save rebuilds the physics worlds. That is deterministic on every
+  platform, but it does not continue the session that wrote the save
+  bit-for-bit (the "caches matter" fact). A replay of a session that began
+  from a save carries that save's state by value in its `SimSetup` and has a
+  non-zero `start_tick`.
+* *What the Phase 3 save ADR reuses from here:* the distinction above, the
+  chunk framing and frozen-prefix idea if it wants a binary container,
+  `SIM_VERSION`, the pilot-0 session convention, and the wire codec for any
+  pending commands.
+
+==== Seeking
+
+* Seeking uses *periodic snapshots kept in memory*, not stored in the file.
+* While a replay plays or fast-forwards, the viewer clones the `Sim` every
+  3,600 ticks (30 s). It keeps at most 32 clones; when full, it drops every
+  other one.
+* To seek to tick T, it restores the latest clone at or before T and
+  re-simulates the commands from the segment index up to T. Within the
+  first 16 minutes of played ground (32 clones of 30 s), that is at most
+  3,600 ticks: about 0.9 s natively and 2.7 s under wasm for a 200-ship
+  scene, at the measured speed. Each time the cache thins, the bound
+  doubles.
+* A seek beyond what has been played simulates forward from the furthest
+  point. Reaching the last minute of an hour-long replay takes 90 to 100 s
+  natively and 3 to 5 minutes under wasm.
+  If that matters (see <<product-questions>>), in-file snapshots come with
+  persisted snapshots, and the interval is a tuning constant in `st-game`.
+
+[[divergence]]
+=== Divergence diagnosis
+
+* *During playback,* each `SEGM` ends with a check of `end_hash` against
+  `state_hash()`. The first mismatch stops verification and reports
+  `Desync { checkpoint_tick, expected, actual, last_good_tick }`. The first
+  divergent tick lies in `(last_good_tick, checkpoint_tick]`. Corruption is
+  reported separately (chunk checksum), so a damaged file never looks like a
+  desync.
+* *Localising the tick.* `determinism --replay <file> --checkpoint-every 1`
+  replays the file and prints a hash for every tick. On two platforms, the
+  first differing line of the outputs is the first divergent tick.
+* *Localising the field.* `--dump-tick <t>` (ADR 0008) on both platforms,
+  then diff: the first differing section, entity and component.
+* The same report serves lockstep peers later: each peer compares the same
+  120-tick hashes (<<multiplayer>>).
+
+=== Harness and CI (SPAC-76)
+
+* *Phase 1, `physics-swarm`.* Its driver produces each ship's thrust and yaw
+  inputs as `Controls` commands for 200 externally controlled pilots
+  (`st_sim::scenarios`), and the simulation turns them into impulses. The
+  scenario content is unchanged from ADR 0008; only the path of its inputs
+  changes. Phase 1 thereby exercises the whole record and replay path before
+  combat exists. `math-kernels` and `data-fixtures` have no commands.
+* *For each scenario with commands, the binary:*
+. runs it live, recording through `ReplayWriter`, and prints the usual
+  `<scenario> <tick> <hash>` lines;
+. prints one more line, `<scenario>.replay <final tick> <FNV-1a 64 of the replay bytes>`,
+  so the four platforms also compare the encoder's output;
+. reads the bytes back through `ReplayReader`, replays them in a fresh
+  `Sim`, and requires every `end_hash` and the final hash to match. On a
+  mismatch it prints the `Desync` report and exits with status 4.
+* *`combat-60s`* uses the same path: AI pilots run inside the simulation,
+  and a seeded scripted driver plays the external pilot. Its log is
+  generated on every run rather than committed, so it never rots when
+  `SIM_VERSION` changes. The wire golden test pins the format itself.
+* *New options:* `--replay <path>` runs a replay file as a scenario named
+  after the file stem and verifies it (exit status 4 on desync).
+  `--force` skips the version and data-set checks and reports the first
+  divergence. It is useful for measuring how a change affects an old
+  replay.
+* *New tests* (`cargo test`, every platform including `wasm32-wasip1`):
+  `snapshot_continuity` and `sim_version_pin` as above, and in `st-sim`:
+  wire round trip and golden bytes, varint edge cases (overlong, overflow),
+  truncation at every byte offset of a small file, and 10,000 seeded random
+  mutations of a valid file. Each must return an error or a valid log, and
+  never panic.
+* *Exit statuses* extend ADR 0008: 4 means a replay verification failed.
+* *CI shape is unchanged* (xref:0003-ci-design.adoc[ADR 0003]). The extra
+  lines flow through the same four artifacts, the `determinism` compare job
+  and `reference.txt`.
+
+[[multiplayer]]
+=== Multiplayer readiness (no netcode designed)
+
+* *Lockstep.* Every peer runs the same `Sim`. A peer stamps its local
+  commands for tick `t + D` (input delay) and sends them, encoded by the
+  same wire codec. Tick `t` steps once every peer's batch for `t` (possibly
+  empty) has arrived. Sorting by (pilot, seq) makes arrival order
+  irrelevant. Each peer records the same log, so every peer holds the same
+  replay. Peers exchange the 120-tick state hashes, and a mismatch produces
+  the same `Desync` report as above.
+* *Server-authoritative.* The server runs `st-sim` headless and assigns the
+  tick on receipt (the client's tick is a hint). It validates through
+  `step`'s atomic errors, and its recording is the authoritative replay.
+  Clients predict with `Sim::clone()` and re-simulate their unacknowledged
+  commands (rollback); the per-pilot `seq` identifies which commands the
+  server applied. Late join needs a persisted snapshot plus the log tail.
+* *Join, leave, handover.* The reserved session kinds `AddPilot`,
+  `RemovePilot` and `SetController` are the path when a remote player joins
+  or an AI takes over a disconnected pilot.
+* Not decided here: transport, input delay, rollback window, matchmaking,
+  security. Multiplayer stays out of scope (PD-04).
+
+[[data-reload]]
+=== Data reload during a recorded session
+
+Data does not change during a recorded session in version 1. A hot reload
+(ADR 0010, development builds) ends the current recording, restarts the
+simulation from its seed with the new data set, and starts a new recording.
+This is the ADR 0010 Phase 1 demo behaviour. The reserved `DataSetChange`
+session kind (naming a data-set hash at a tick boundary) is the path if
+live patching is ever wanted. Playback would then need that data set to be
+available.
+
+[[narrative]]
+=== External providers (PD-05)
+
+A future narrative provider is a session input source. Its outputs (text,
+choices, ids) enter as `Narrative` session commands (tag 2000): a provider id
+followed by an opaque UTF-8 or byte payload of at most 1 MiB. The simulation
+treats them as data. Playback reads them from the log and never calls the
+provider. No part of this is implemented now. The format already carries
+variable-length payloads, so nothing blocks it.
+
+=== Dependencies
+
+None new. `st_sim::replay` and the wire codec use only `core` and `alloc`
+plus the ADR 0008 FNV-1a implementation. The header goes through `st-data`,
+which brings the ADR 0010 dependencies (`serde`, `ron`, `blake3`, ...)
+already admitted for it. Rapier's `serde-serialize` is not enabled.
+
+=== Work for Builders
+
+`st-sim` (Phase 1)::
+  `PilotId`, `Command`, `CommandKind` with `Controls`, the tag table with the
+  reserved tags, `ControlState`, the wire codec, `command::sort`, `step`
+  validation with the errors and limits above, pilot 0, per-pilot last
+  sequence and control state in the hashed state, `SIM_VERSION`,
+  `impl Clone for Sim`, `st_sim::replay` (writer, reader, `read_header`,
+  playback verification) and its tests. The `physics-swarm` driver emits
+  `Controls` commands.
+`st-data` (Phase 1)::
+  The envelope writer, and registration of the `replay` header kind
+  (schema type in `st-sim`, player-held).
+`tools/determinism` (SPAC-76)::
+  Record, encode, decode and verify per scenario; the `.replay` lines;
+  `--replay` and `--force`; exit status 4; `snapshot_continuity`;
+  `sim_version_pin` and `sim-version.txt`.
+`st-game` and `st-platform` (Phase 2)::
+  The input mapping as a command source, the per-tick loop with the
+  recorder, appending chunks through `st-platform`, and a replay source. A
+  viewer with the seek cache only if <<product-questions>> makes replays
+  player-facing.
+
+== Alternatives considered
+
+RON for the whole log::
+  Admitted already and readable, but about three times larger than the
+  binary body, slower to parse over hours of ticks, and without a natural
+  canonical byte form. RON is kept where it pays: the small header that must
+  stay readable forever.
+A fixed binary header with `kind` and `version` fields::
+  Works, but it duplicates ADR 0010's envelope, its two-pass version check,
+  its migrations and its diagnostics, and it is not readable without a tool.
+`serde` derives on `Command` with a binary serde format (`postcard` or similar)::
+  Less code, but it is a new dependency, and serde encodes enum variants by
+  their position, so reordering variants silently changes the format.
+  Hand-written tags make every format change visible in review. The command
+  set is small.
+A versioned payload per command::
+  Lets a newer build decode older commands, but that is worthless while the
+  simulation itself is version-locked. It is part of the cost of portable
+  replays, not a feature on its own.
+Logging AI commands too::
+  It would grow the log by up to 200 pilots' worth of commands and gain
+  nothing: AI is deterministic and recomputed. Lockstep games keep AI
+  inside the simulation for the same reason.
+Version-portable replays::
+  See the cost in <<version-policy>>.
+Snapshots inside replay files from version 1::
+  Faster first seeks in long replays, but it needs the persisted snapshot
+  encoding now, with `serde-serialize` turning on Rapier's `std` and a new
+  serde format. In-memory snapshots cover seeking within played ground at
+  no cost.
+Rebuilding physics from body state as the snapshot::
+  Disproved: it diverges at the next checkpoint because the contact and
+  warm-start caches are lost.
+CRC32 or BLAKE3 chunk checks::
+  CRC32 needs a new crate. BLAKE3 would make `st-sim` a direct user of a
+  crate it otherwise reaches only through `st-data`. FNV-1a 64 is already in
+  `st-sim` and detects the accidental damage this guards against.
+Compression from version 1::
+  It needs a new dependency (a C codec such as zstd also hurts wasm), for
+  an estimated worst case under 10 MB/h. Deferred to measurement.
+Data changes inside the log (hot reload while recording)::
+  Playback would need every intermediate data set. A restart is simpler and
+  is what ADR 0010's demo already does. The tag is reserved.
+
+== Consequences
+
+* Phase 1 `st-sim` grows a small pilot and command layer earlier than it
+  otherwise would, because `physics-swarm` drives through commands. In
+  return, the record and replay path is tested on four platforms from the
+  first harness run.
+* Every intentional simulation change appends a line to
+  `tools/determinism/sim-version.txt` and makes earlier replays unplayable.
+  This is visible and cheap, and it is the price of the version lock.
+* Replays survive a reinstall of the same build but not an update, until
+  the owner decides otherwise.
+* Network play later reuses the codec, the stamping, the ordering, the
+  atomic validation, the session pilot and the checkpoint hashes. It does
+  not need a second input path.
+* Saves (Phase 3) cannot be exact snapshots, and loading a save starts a
+  new deterministic history. The save ADR inherits this.
+* Revisit when: the owner answers the version question; Phase 2 measures
+  log sizes above 10 MB/h; a feature needs persisted snapshots; or
+  multiplayer moves into scope.
+
+[[product-questions]]
+=== Product questions (not decided here)
+
+. *Replays across game versions.* Assumed: version-locked. Should a
+  player's replays keep playing after a game update? If yes, see the cost
+  above. (Also listed in ADR 0007.)
+. *Are replays player-facing in the MVP?* Options: automatic recording of
+  every session, a viewer with a timeline and seeking, sharing files with
+  other players. Or are replays a developer and test tool until later?
+  The format serves both. The answer decides the `st-game` viewer work, how
+  long the recordings are (whole sessions or encounters only), and whether
+  slow first seeks in hour-long replays matter.
+
+== References
+
+* PD-01, PD-04, PD-05, PD-06, PD-11 and PD-27 in `docs/decisions/`
+* xref:0002-dependency-policy.adoc[ADR 0002],
+  xref:0003-ci-design.adoc[ADR 0003],
+  xref:0006-math-library-boundary.adoc[ADR 0006],
+  xref:0007-large-world-coordinates.adoc[ADR 0007],
+  xref:0008-determinism-implementation.adoc[ADR 0008],
+  xref:0010-data-schema-versioning.adoc[ADR 0010]
+* Rapier: https://crates.io/crates/rapier3d-f64; ron: https://crates.io/crates/ron
+* PNG specification, section "PNG signature" (rationale for the magic bytes): https://www.w3.org/TR/png/
+* Unsigned LEB128: https://en.wikipedia.org/wiki/LEB128
+* Jira: SPAC-106, SPAC-76

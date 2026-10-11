@@ -48,6 +48,11 @@ in the same commit.
 | Accepted
 | 2026-10-11
 
+| xref:0009-command-log-and-replay-format.adoc[0009]
+| Command log and replay format
+| Accepted
+| 2026-10-11
+
 | xref:0010-data-schema-versioning.adoc[0010]
 | Data schema versioning, migration, content hashing and hot reload
 | Accepted
