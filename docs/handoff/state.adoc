@@ -69,15 +69,13 @@ Then the Phase 1 crates and tooling:
 
 Needed before Phase N means the answer must exist before that phase starts.
 
-* G2, controls (needed before Phase 2): devices and default bindings; target cycling; land/autopilot, hail and board keys.
-* G7, combat (needed before Phase 2): laser model (instant beam with overheat vs travelling bolts, undecided); lead indicator; shield regeneration; what armour regions do; disable-and-board vs destroy; player death; escorts.
-* G5, economy (basic needed before Phase 2, full needed before Phase 3): price formula, production and consumption, player impact, cargo units, starting credits and ship, commodity list, illegal goods.
-* G9, traffic (basic needed before Phase 2): AI archetypes and traffic density per system.
+* Needed before the Phase 3 save-format work: should an older build open a save or design made by a newer build? ADR 0010 currently refuses.
+* Needed before the Phase 3 save-format work: can a design that fails the current rules be opened in the shipyard for repair?
 * Later, needed before Phase 3: G4 navigation and jumps, G6 factions and law, G8 missions, G11 saves and sessions. Needed before Phase 5: G14 audio direction.
 * Licence: deferred by the owner. All rights reserved meanwhile. To be decided at the first crate publication review or the MVP release, whichever comes first (open point #7).
 * Open point #15, the native X11 test session, is parked until Phase 6.
 
-G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
+G2, G5 (basic), G7 and G9 (basic) are answered (PD-27 to PD-30). G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
 
 == Where to start
 

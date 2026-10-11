@@ -1,0 +1,32 @@
+= PD-28: Combat: armour facings, boarding, insurance
+:description: Product decision PD-28
+
+* *Date:* 2026-10-11
+* *Resolves:* design backlog G7 (SPAC-110)
+
+*Context.* Phase 2 needs the combat rules: weapons, shields and armour, targeting, disabled ships, player death and escorts.
+
+*Decision.*
+
+* Laser model is undecided. Phase 2 builds both an instant beam with overheat and travelling bolts as a side-by-side prototype, and the owner chooses after playing.
+* Lead indicator: on, toggleable in settings. It is relevant to bolts.
+* Shields recharge slowly and constantly. Armour is repaired only at port.
+* Armour, realistic mode: directional facings. The slice is planar and has front, rear, left and right; top and bottom are added with free 6-DOF. A hit on a facing has a probability of damaging the systems behind it, depending on the ship's section layout (rear hits can damage engines, side or bottom hits can damage cargo). This is data-driven, because player-built ships are planned.
+* Armour, easy mode: a classic single armour bar with no system effects.
+* Section targeting: by default a hit lands where it lands. Aiming at a chosen section requires an expensive outfitter item (targeting computer), and the same rule applies to NPCs.
+* Disabled ships can be boarded for cargo and credits. Capture is excluded from the slice and planned for later.
+* Player death: respawn at the last port and pay an insurance fee as a share of ship value, capped at the credits the player has, so a player with no money pays nothing.
+* Escorts: at most 3 (reference: _EV: Nova_), chosen with multiplayer fairness in mind. They are hired through the mission board: the player gives a mission to another pilot. There is no bar (PD-02).
+
+*Alternatives considered.*
+
+* Choosing the laser model now: rejected, because it is a feel question best answered by playing both.
+* A single armour bar only: kept as the easy mode.
+
+*Consequences.*
+
+* Phase 2 carries the cost of two laser prototypes.
+* Facing and section-effect rules live in data files.
+* Capture of disabled ships is a later item.
+
+*Reference games.* _EV: Nova_, _Freelancer_, _Elite Dangerous_, _Rebel Galaxy_.

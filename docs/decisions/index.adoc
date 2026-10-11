@@ -141,4 +141,24 @@ Supporting material: xref:research-gpu-relative-performance-2026-10.adoc[GPU rel
 |Space scale: compressed, with a cruise mode
 |2026-10-10
 |xref:pd-26-space-scale.adoc[pd-26-space-scale.adoc]
+
+|PD-27
+|Controls: keyboard and mouse, combat mode toggle
+|2026-10-11
+|xref:pd-27-controls.adoc[pd-27-controls.adoc]
+
+|PD-28
+|Combat: armour facings, boarding, insurance
+|2026-10-11
+|xref:pd-28-combat.adoc[pd-28-combat.adoc]
+
+|PD-29
+|Economy basics: light supply and demand
+|2026-10-11
+|xref:pd-29-economy-basics.adoc[pd-29-economy-basics.adoc]
+
+|PD-30
+|Traffic basics: four archetypes, medium density
+|2026-10-11
+|xref:pd-30-traffic-basics.adoc[pd-30-traffic-basics.adoc]
 |===

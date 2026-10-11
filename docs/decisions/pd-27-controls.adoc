@@ -1,0 +1,31 @@
+= PD-27: Controls: keyboard and mouse, combat mode toggle
+:description: Product decision PD-27
+
+* *Date:* 2026-10-11
+* *Resolves:* design backlog G2 (SPAC-109)
+
+*Context.* Phase 2 needs devices, default bindings, target cycling, and land, hail and board keys before flight and combat can be built.
+
+*Decision.* Keyboard and mouse are the devices. A gamepad comes after the vertical slice, and the action list is designed so it can be added.
+
+* Combat mode is a toggle.
+* In normal flight the mouse does not steer, which keeps _EV: Nova_ style controls.
+* In combat mode the ship turns toward the mouse.
+* Next hostile and next any target are separate keys.
+* Placeholder bindings: A/D rotate, W thrust, S brake, Q/E strafe (combat mode), Space primary weapon, Ctrl/Shift secondary weapon, X countermeasures, C cruise, Tab next hostile, T next any target, R nearest target, L land, J jump, B board, H hail.
+* Coming later: an autopilot that flies to the selected body and stops when a hostile appears.
+* A full rebinding screen comes before the slice ends.
+
+*Alternatives considered.*
+
+* Keyboard only (_EV: Nova_): simpler, but gives up mouse aiming in combat.
+* Add a gamepad now (_Everspace_): wider audience, but more work before the slice.
+* Hold-to-aim: rejected in favour of a toggle.
+* Mouse flight (_Freelancer_): rejected for normal flight.
+
+*Consequences.*
+
+* The input layer is built around a list of actions, so a gamepad can be added later without redesign.
+* The bindings above are placeholders until the rebinding screen exists.
+
+*Reference games.* _EV: Nova_, _Freelancer_, _Everspace_.

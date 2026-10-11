@@ -1,0 +1,29 @@
+= PD-29: Economy basics: light supply and demand
+:description: Product decision PD-29
+
+* *Date:* 2026-10-11
+* *Resolves:* design backlog G5, basic part (SPAC-111)
+
+*Context.* Phase 2 needs a basic economy so trading and early progression can be built. The full economy is a Phase 3 item.
+
+*Decision.* Light supply and demand.
+
+* A port's starting prices come from its economy type, shift with the player's trades, and recover over a few game hours.
+* There are no production chains.
+* 1 ton = 1 unit for every commodity.
+* The player starts poor, in the shuttle, with one laser.
+* There are 10–12 placeholder commodities, including 2 illegal ones. Final names come from the PD-07 naming work.
+* Patrols scan. Being caught means a fine and lower standing with that faction. Detailed law rules come with G6.
+* NPC trade is decoration only for now and does not move prices.
+
+*Alternatives considered.*
+
+* Fixed prices (_EV: Nova_): simplest, but trading has no feedback.
+* Production chains (_X4_): deepest, but too large for Phase 2.
+
+*Consequences.*
+
+* Price data and economy types live in data files.
+* The full economy is decided before Phase 3.
+
+*Reference games.* _EV: Nova_, _X4_.
