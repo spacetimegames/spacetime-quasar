@@ -16,11 +16,11 @@
 * Section targeting: by default a hit lands where it lands. Aiming at a chosen section requires an expensive outfitter item (targeting computer), and the same rule applies to NPCs.
 * Disabled ships can be boarded for cargo and credits. Capture is excluded from the slice and planned for later.
 * Player death: respawn at the last port and pay an insurance fee as a share of ship value, capped at the credits the player has, so a player with no money pays nothing.
-* Escorts: at most 3 (reference: _EV: Nova_), chosen with multiplayer fairness in mind. They are hired through the mission board: the player gives a mission to another pilot. There is no bar (PD-02).
+* Escorts: at most 3 (reference: _EV: Nova_), chosen with multiplayer fairness in mind. They are hired through the mission board: the player gives a mission to another pilot. There is no bar in the slice (PD-02).
 
 *Alternatives considered.*
 
-* Choosing the laser model now: rejected, because it is a feel question best answered by playing both.
+* Choosing the laser model now: not done; the owner chooses after playing both prototypes.
 * A single armour bar only: kept as the easy mode.
 
 *Consequences.*
