@@ -8,7 +8,7 @@ use st_time::{DT, TICK_RATE_HZ, Tick};
 
 use crate::command::{
     CONTROLS_COMPONENT_TAG, Command, CommandKind, ControlState, MAX_COMMANDS_PER_TICK, PilotId,
-    StepError,
+    StepError, wire,
 };
 use crate::hash::{DumpLine, HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
 
@@ -113,6 +113,9 @@ impl Ship {
 
 #[derive(Clone, Debug)]
 struct Pilot {
+    /// Whether commands come from outside the simulation. Every pilot is
+    /// external until AI pilots exist; not hashed while that holds (ADR 0009).
+    external: bool,
     controlled: Option<u64>,
     last_seq: u64,
     controls: ControlState,
@@ -130,6 +133,27 @@ pub struct Sim {
     gravity_mu: f64,
     ships: BTreeMap<u64, Ship>,
     pilots: BTreeMap<PilotId, Pilot>,
+}
+
+/// Which size limit a command breaks (ADR 0009, "Validation and stepping").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SizeLimit {
+    /// One payload is above 1 MiB.
+    Payload,
+    /// The tick's commands are above 2 MiB together.
+    Tick,
+}
+
+/// Adds one command to the byte count of its tick. A command counts its
+/// payload plus the largest framing of one command.
+fn account_size(tick_bytes: usize, payload_len: usize) -> Result<usize, SizeLimit> {
+    if payload_len > wire::MAX_PAYLOAD_BYTES {
+        return Err(SizeLimit::Payload);
+    }
+    match tick_bytes.checked_add(payload_len + wire::FRAME_OVERHEAD) {
+        Some(total) if total <= wire::MAX_TICK_BYTES => Ok(total),
+        _ => Err(SizeLimit::Tick),
+    }
 }
 
 fn finite3(v: DVec3) -> bool {
@@ -177,6 +201,7 @@ impl Sim {
         pilots.insert(
             PilotId::SESSION,
             Pilot {
+                external: true,
                 controlled: None,
                 last_seq: 0,
                 controls: ControlState::default(),
@@ -192,6 +217,7 @@ impl Sim {
                 return Err(SetupError::UnknownShip(ship));
             }
             let pilot = Pilot {
+                external: true,
                 controlled,
                 last_seq: 0,
                 controls: ControlState::default(),
@@ -266,6 +292,7 @@ impl Sim {
             });
         }
         let mut previous: Option<(PilotId, u64)> = None;
+        let mut tick_bytes = 0_usize;
         for (index, cmd) in commands.iter().enumerate() {
             if cmd.tick != self.tick {
                 return Err(StepError::WrongTick { index });
@@ -277,15 +304,26 @@ impl Sim {
             let Some(pilot) = self.pilots.get(&cmd.pilot) else {
                 return Err(StepError::UnknownPilot { index });
             };
+            // Order: source, then who controls the pilot, then the payload.
             match &cmd.kind {
-                CommandKind::Controls(c) => {
-                    if cmd.pilot == PilotId::SESSION {
-                        return Err(StepError::WrongSource { index });
-                    }
-                    if !c.is_valid() {
-                        return Err(StepError::InvalidPayload { index });
-                    }
+                CommandKind::Controls(_) if cmd.pilot == PilotId::SESSION => {
+                    return Err(StepError::WrongSource { index });
                 }
+                CommandKind::Controls(_) => {}
+            }
+            if !pilot.external {
+                return Err(StepError::NotExternal { index });
+            }
+            match account_size(tick_bytes, wire::payload_len(&cmd.kind)) {
+                Ok(total) => tick_bytes = total,
+                Err(SizeLimit::Payload) => return Err(StepError::InvalidPayload { index }),
+                Err(SizeLimit::Tick) => return Err(StepError::TickTooLarge { index }),
+            }
+            match &cmd.kind {
+                CommandKind::Controls(c) if !c.is_valid() => {
+                    return Err(StepError::InvalidPayload { index });
+                }
+                CommandKind::Controls(_) => {}
             }
             // Sorted strictly ascending, so checking against the state is
             // enough: later commands of the same pilot have higher numbers.
@@ -388,5 +426,83 @@ impl Sim {
         h.tag(b"GLOB");
         h.f64(self.gravity_mu)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> Setup {
+        Setup {
+            ships: vec![ShipInit {
+                id: 1,
+                system: 0,
+                position: DVec3::new(10.0, 0.0, 0.0),
+                velocity: DVec3::ZERO,
+                heading: 0.0,
+                max_accel: 1.0,
+                max_turn_rate: 1.0,
+                drag: 0.0,
+            }],
+            pilots: vec![(PilotId(1), Some(1))],
+            gravity_mu: 0.0,
+        }
+    }
+
+    fn command(pilot: u64, seq: u64) -> Command {
+        Command {
+            tick: 0,
+            pilot: PilotId(pilot),
+            seq,
+            kind: CommandKind::Controls(ControlState::default()),
+        }
+    }
+
+    #[test]
+    fn a_pilot_controlled_inside_the_simulation_takes_no_commands() {
+        let mut sim = Sim::new(&setup(), 0).unwrap();
+        let before = sim.state_hash().unwrap();
+        // No AI exists yet, so nothing sets this in a real run.
+        sim.pilots.get_mut(&PilotId(1)).unwrap().external = false;
+        assert_eq!(
+            sim.step(&[command(1, 1)]),
+            Err(StepError::NotExternal { index: 0 })
+        );
+        assert_eq!((sim.tick(), sim.state_hash().unwrap()), (0, before));
+        // The check is per pilot: the session is still external.
+        assert_eq!(
+            sim.step(&[command(0, 1)]),
+            Err(StepError::WrongSource { index: 0 })
+        );
+    }
+
+    #[test]
+    fn size_limits() {
+        assert_eq!(account_size(0, 15), Ok(55));
+        assert_eq!(
+            account_size(0, wire::MAX_PAYLOAD_BYTES),
+            Ok(wire::MAX_PAYLOAD_BYTES + wire::FRAME_OVERHEAD)
+        );
+        assert_eq!(
+            account_size(0, wire::MAX_PAYLOAD_BYTES + 1),
+            Err(SizeLimit::Payload)
+        );
+        // Two maximal payloads fit in a tick's 2 MiB only without the framing.
+        let one = account_size(0, wire::MAX_PAYLOAD_BYTES).unwrap();
+        assert_eq!(
+            account_size(one, wire::MAX_PAYLOAD_BYTES),
+            Err(SizeLimit::Tick)
+        );
+        // The last command that fits, and the one that does not.
+        assert_eq!(
+            account_size(wire::MAX_TICK_BYTES - 55, 15),
+            Ok(wire::MAX_TICK_BYTES)
+        );
+        assert_eq!(
+            account_size(wire::MAX_TICK_BYTES - 54, 15),
+            Err(SizeLimit::Tick)
+        );
+        assert_eq!(account_size(usize::MAX, 1), Err(SizeLimit::Tick));
     }
 }

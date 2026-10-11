@@ -13,14 +13,25 @@
 //! [`st_math::det`] for transcendental math and [`st_rng`] for randomness, and
 //! it reads no clock.
 //!
-//! Boundary: no GPU, no input devices, no wall clock, no files. A sim crate
-//! under ADR 0008, so it carries no clippy opt-out.
+//! A command log is a file too (ADR 0009). [`command::wire`] is the command
+//! codec (varints, the tag table with the reserved tags, golden bytes),
+//! [`replay`] writes and reads `.stqreplay` files and plays them back against
+//! their checkpoint hashes, and [`SIM_VERSION`] names the simulation a replay
+//! was recorded by: a replay plays only in a build with the same version
+//! (PD-33). [`Sim::step`] enforces the ADR 0009 limits (1,024 commands per
+//! tick, 1 MiB per payload, 2 MiB per tick).
 //!
-//! Non-goals (not yet built). From ADR 0009: replay files (`st_sim::replay`),
-//! the command wire encoding and its tag table with the reserved tags,
-//! `SIM_VERSION`, session commands, the `StepError` variants `NotExternal` and
-//! `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits.
-//! Also: Rapier physics, weapons, AI, economy.
+//! Boundary: no GPU, no input devices, no wall clock, no files. The replay
+//! code works on byte slices and `Vec<u8>`; the caller stores them (through
+//! `st-platform`, or `std::fs` in a tool). A sim crate under ADR 0008, so it
+//! carries no clippy opt-out.
+//!
+//! Non-goals (not yet built). From ADR 0009: session commands (`AddPilot`,
+//! `RemovePilot`, `SetController`, `DataSetChange`, `Narrative`; their tags
+//! are reserved and decode as an error), AI pilots (so no pilot is controlled
+//! inside the simulation yet, and `StepError::NotExternal` cannot occur in a
+//! real run), persisted snapshots, and the replay viewer and seek cache
+//! (`st-game`, SPAC-121). Also: Rapier physics, weapons, AI, economy.
 //!
 //! # Example
 //!
@@ -46,9 +57,25 @@
 
 pub mod command;
 mod hash;
+pub mod replay;
 pub mod scenarios;
 mod sim;
 
 pub use command::{Command, CommandKind, ControlState, PilotId, StepError};
 pub use hash::{DumpLine, HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
 pub use sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
+
+/// The simulation version (ADR 0009, "Version policy"). A replay recorded by
+/// one version is refused by every other, because the simulation is
+/// version-locked to its recordings (PD-33).
+///
+/// A change bumps it, with a new line in `tools/determinism/sim-version.txt`,
+/// when it changes a pinned reference line, a command kind, its payload or
+/// encoding, the setup encoding, the `replay` container version, the `st-rng`
+/// algorithm, or the version of a simulation dependency in `Cargo.lock`.
+/// It is not part of the state hash.
+///
+/// ```
+/// assert!(st_sim::SIM_VERSION >= 1);
+/// ```
+pub const SIM_VERSION: u32 = 1;

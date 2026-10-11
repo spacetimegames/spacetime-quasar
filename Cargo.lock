@@ -1768,6 +1768,8 @@ version = "0.0.0"
 name = "st-sim"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "st-data",
  "st-math",
  "st-rng",
  "st-time",

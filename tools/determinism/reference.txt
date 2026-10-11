@@ -21,12 +21,14 @@ orbit-coast 00000840 aeabfa55479d0b2f
 orbit-coast 00000960 41fbb21fb6b51606
 orbit-coast 00001080 01bafea24cf9460c
 orbit-coast 00001200 d01e264a443a2639
+orbit-coast.replay 00001200 915f824e695a7e80
 solo-burn 00000000 6bbbed428433d65d
 solo-burn 00000120 f909754fd00c5f20
 solo-burn 00000240 5d300c4703f5181a
 solo-burn 00000360 172a8e32ba0f82d7
 solo-burn 00000480 be92efdbecbd2de4
 solo-burn 00000600 464185598f63cc24
+solo-burn.replay 00000600 cdcb91352c192319
 swarm-controls 00000000 91dd8e4bdf5bd0d2
 swarm-controls 00000120 cc98b6323094ba9a
 swarm-controls 00000240 8548972a55be7cb0
@@ -48,3 +50,4 @@ swarm-controls 00002040 37f7d1aed70b2cfc
 swarm-controls 00002160 da9a4504bb8c1ff6
 swarm-controls 00002280 2bb17845d35ffded
 swarm-controls 00002400 bbf19e4353a2c0a9
+swarm-controls.replay 00002400 9aaf720f2c506da6

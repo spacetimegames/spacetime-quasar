@@ -1,3 +1,4 @@
-# The determinism reference must stay byte-identical on every platform (ADR 0003).
+# The determinism reference and the SIM_VERSION pin must stay byte-identical on every platform (ADR 0003, ADR 0009).
 tools/determinism/reference.txt text eol=lf
 *.ron text eol=lf
+tools/determinism/sim-version.txt text eol=lf
