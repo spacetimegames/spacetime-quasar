@@ -43,6 +43,10 @@ impl<K: Ord, V> UniqueMap<K, V> {
     }
 
     /// Inserts a value, returning the previous value for the key, if any.
+    ///
+    /// A duplicate key overwrites the earlier value: only deserialisation
+    /// rejects duplicates (`duplicate-key`), because there the duplicate is
+    /// an authoring mistake in a file.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         self.0.insert(key, value)
     }
@@ -74,6 +78,8 @@ impl<K: Ord, V> core::ops::Deref for UniqueMap<K, V> {
     }
 }
 
+/// Collects pairs into a map. A duplicate key overwrites the earlier value
+/// (the last one wins); only deserialisation rejects duplicates.
 impl<K: Ord, V> FromIterator<(K, V)> for UniqueMap<K, V> {
     fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
         Self(iter.into_iter().collect())

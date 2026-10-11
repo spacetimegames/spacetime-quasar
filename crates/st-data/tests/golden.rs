@@ -387,3 +387,36 @@ fn data_set_edge_cases() {
     assert_eq!(dup.code, Code::DuplicateKey);
     assert!(empty.to_string().starts_with("b3:"));
 }
+
+/// Pins the byte-wise order with a preimage built by hand and hashed with
+/// `blake3` directly, so a case-folding, locale or Unicode-aware sort fails.
+#[test]
+fn data_set_hash_matches_a_hand_built_bytewise_preimage() {
+    // Byte-wise: `B` (42) < `a` (61); then `a-b.ron` (2D) < `a.ron` (2E) <
+    // `a/b.ron` (2F); `é` (C3 A9) last. A case-folding sort would put
+    // `B.ron` after the `a*` names; a locale sort would put `é.ron` after `a`.
+    let ordered = ["B.ron", "a-b.ron", "a.ron", "a/b.ron", "é.ron"];
+    let hash_of = |i: usize| ContentHash::from_bytes([u8::try_from(i).unwrap() + 1; 32]);
+
+    let mut preimage = Vec::new();
+    preimage.extend_from_slice(&5u64.to_le_bytes());
+    for (i, source) in ordered.iter().enumerate() {
+        for text in ["k", source] {
+            preimage.extend_from_slice(&(text.len() as u64).to_le_bytes());
+            preimage.extend_from_slice(text.as_bytes());
+        }
+        preimage.extend_from_slice(&32u64.to_le_bytes());
+        preimage.extend_from_slice(hash_of(i).as_bytes());
+    }
+    let mut hasher = blake3::Hasher::new_derive_key("st-data 2026-10-11 data set hash v1");
+    hasher.update(&preimage);
+    let expected = *hasher.finalize().as_bytes();
+
+    // Supplied in a scrambled order.
+    let scrambled = [4usize, 0, 3, 1, 2];
+    let entries: Vec<_> = scrambled
+        .iter()
+        .map(|&i| entry("k", ordered[i], &hash_of(i)))
+        .collect();
+    assert_eq!(data_set_hash(&entries).unwrap().as_bytes(), &expected);
+}
