@@ -1,0 +1,349 @@
+= ADR 0007: Large-world coordinates: f64 simulation, f32 camera-relative rendering
+:toc: macro
+
+toc::[]
+
+== Status
+
+Accepted. Amends the MSRV in xref:0001-toolchain-msrv-nix.adoc[ADR 0001] and
+the `msrv` job in xref:0003-ci-design.adoc[ADR 0003]: 1.89 from the PR that
+adds `rapier3d-f64`.
+
+== Date
+
+2026-10-11
+
+== Context
+
+The charter and the product decisions bind this decision:
+
+* PD-26 (owner decision): compressed space with a cruise mode. Bodies in a
+  system are roughly 1 to 2 minutes apart at normal flight speed. A cruise
+  key multiplies speed several times outside combat. Planets can be rendered
+  large and scenic. The Architect derives floating-origin thresholds and f32
+  versus f64 from this.
+* The MVP has two star systems and one jump link. There are N pilots
+  (PD-04), so two pilots can be far apart in the same system, and a headless
+  `st-sim` may later run as a dedicated server.
+* PD-06: f32 versus f64 for simulation state is decided by this ADR, together
+  with the large-world coordinate scheme.
+* The simulation is 3D-native: position, orientation quaternion, linear and
+  angular velocity for every ship. The planar constraint is a releasable
+  physics constraint (Rapier `LockedAxes`), never a 2D model (PD-01). The
+  simulation runs at a deterministic fixed step (about 120 Hz), decoupled
+  from rendering.
+* Rapier handles rigid bodies, and Parry handles continuous swept queries
+  (projectiles against hulls). Ships use compound colliders built from their
+  sections.
+* `st-math` owns coordinate frames and large-world translation
+  (camera-relative origin).
+* Rendering is camera-relative, GPU-driven, instanced and N-view (stereo VR
+  later, PD-10). The target is about 200 visible ships and 50 projectiles at
+  60 fps. The browser build is WebGPU-only (PD-11).
+* The math library and the conversion points are fixed by
+  xref:0006-math-library-boundary.adoc[ADR 0006]; the determinism rules,
+  including the 120 Hz tick, by
+  xref:0008-determinism-implementation.adoc[ADR 0008]. Data files and their
+  floats follow xref:0010-data-schema-versioning.adoc[ADR 0010].
+
+=== Facts verified on 2026-10-11
+
+* Rapier and Parry come as separate crates per precision: `rapier3d` /
+  `parry3d` use `Real = f32`, and `rapier3d-f64` / `parry3d-f64` use
+  `Real = f64` (crates.io, 0.36.1 and 0.31.1). Inside each crate, the `f32`
+  or `f64` feature only selects code for that crate's real type.
+* `rapier3d-f64` 0.36.1 needs `nalgebra ^0.35` (0.35.0 declares
+  `rust-version` 1.89.0) and, through `simba` 0.10.2, `wide ^1.5` (every
+  `wide` 1.x declares `rust-version` 1.89). No compatible release of the
+  glam-based Rapier line builds with the current MSRV 1.88.
+* wgpu 30.0.1 `Features::SHADER_F64` is documented as native-only and
+  Vulkan-only, and as "frequently between 16 and 64 times slower" than f32.
+  WebGPU has no f64.
+* IEEE 754 spacing (ULP) for a value in `+[2^e, 2^(e+1))+` is `+2^(e-52)+` in f64
+  and `+2^(e-23)+` in f32 (values in the tables below are computed from this).
+* A scratch probe outside the repository (`rapier3d-f64` 0.36.1 with the
+  features decided below, Rust 1.99.0, release build) simulated 200 ships for
+  7,200 ticks at 120 Hz: one compound collider each, planar `LockedAxes`, CCD
+  on every other body, seeded impulses, 50 Parry shape casts per tick, at
+  (500 km, 0, 300 km) from the system origin.
+** On the development machine (Intel Core i9-11980HK, Linux), each run took
+   1.52 to 1.67 s. The same scenario with `rapier3d` (f32) took 1.30 to
+   1.35 s, so f64 costs about 15 to 20 %.
+** On `wasm32-wasip1` under wasmtime 49.0.2, the f64 run took 3.4 to 5.3 s.
+   The checkpoint hashes matched the native run bit for bit (details in
+   ADR 0008).
+** The tree adds about 22 crates to `Cargo.lock` (`nalgebra`, `simba`, `wide`,
+   `glamx`, `parry3d-f64`, `rstar` and others). With the repository's
+   `deny.toml`, `cargo deny check licenses bans sources` passed.
+
+== Decision
+
+=== Units and axes
+
+* The world unit is the metre. Code uses SI units throughout (metre,
+  second, kilogram, radian, newton). One render-space unit is also one
+  metre.
+* Frames are right-handed with +Y up. The gameplay plane of a system is its
+  XZ plane (y = 0).
+* A ship's local frame (body frame) has +Z forward (the nose), +Y up and −X
+  to the right. This is the glTF convention.
+* The MVP planar constraint is
+  `+LockedAxes::TRANSLATION_LOCKED_Y | LockedAxes::ROTATION_LOCKED_X | LockedAxes::ROTATION_LOCKED_Z+`:
+  free motion in the plane and yaw only. Free 6-DOF flight (post-MVP) clears
+  these flags; nothing else in the state changes.
+
+=== System frames
+
+* Each star system has its own frame, with its origin at the system's
+  primary star (or barycentre) and the axes above. A position is a pair:
+  the system, and a `DVec3` in that system's frame.
+* Each system has its own Rapier world: pipeline, body and collider sets,
+  broad phase. A body belongs to exactly one system world. There is no
+  physics interaction across systems. A jump moves a body between worlds at
+  a tick boundary: remove it from the source world, insert it into the
+  destination world at the arrival pose. Jump rules are gameplay (G4).
+* Worlds are stepped in ascending system-id order within a tick (ADR 0008).
+
+=== Extent derived from PD-26
+
+PD-26 leaves the speeds to data. The engineering envelope below covers any
+plausible tuning; it is not a gameplay decision.
+
+[cols="3,2,5",options="header"]
+|===
+| Quantity | Envelope | Derivation
+
+| Normal flight speed
+| at most 1,000 m/s
+| An assumption: EV-style combat speeds in the hundreds of m/s for hulls
+  10 to 300 m long. Data above this needs a revisit of this table.
+
+| Spacing between adjacent bodies
+| at most 120 km
+| 1 to 2 minutes at normal speed: 60 to 120 s times 1,000 m/s.
+
+| Cruise speed
+| at most 10 km/s
+| "Several times" taken as at most 10 times normal speed.
+
+| Distance of the outermost body from the primary
+| about 2,000 km
+| At most 16 spacings of 120 km is 1,920 km.
+
+| Simulation validity bound
+| every coordinate within ±2^23 m (8,388,608 m) of the system origin
+| More than 4 times the derived extent. `st-data` rejects content placed
+  outside it; `st-sim` reports bodies that leave it. What happens to a ship
+  at the bound is a gameplay question (see Consequences).
+|===
+
+Precision does not depend on this bound, because f64 keeps sub-millimetre
+spacing out to 10^12 m. The bound exists for data validation, for the
+magnitudes the renderer must handle, and to give tests a defined domain.
+
+=== Precision: f64 simulation and physics, no simulation rebasing
+
+* All floating-point simulation state is f64: positions, orientations,
+  linear and angular velocities, forces, mass properties, timers kept as
+  floats. Types follow ADR 0006: `DVec3`, `DQuat`, `DMat3`. The simulation
+  holds no f32 state (no mixed precision).
+* Physics uses `rapier3d-f64` (Rapier's real type f64), with Parry through
+  `rapier3d_f64::parry`.
+* Coordinates are absolute in the system frame. The simulation has no
+  floating origin, no sectors and no fixed-point grid, and never rebases.
+* Positions in data files (system layouts) and in saves are f64 metres in
+  the system frame, written as ADR 0010 schema types (finite floats, exact
+  round trip). `st-data` checks them against the validity bound above.
+* The GPU never receives f64. Rendering, HUD and audio work in f32 render
+  space (below).
+
+=== Render origin and rebasing rule
+
+`st-math` provides `RenderOrigin`, a generic type (no game types) that holds
+the render origin `O` (a `DVec3` in the current system frame) and implements
+this rule:
+
+* *Grid.* `O` always lies on a 4,096 m grid: each coordinate is an integer
+  multiple of `G = 4096.0`.
+* *Rebase.* Once per rendered frame, before any render-space value is
+  produced: if the camera position `c` is more than 3,072 m (0.75 G) from
+  `O` on any axis, set `O` to `c` rounded per axis to the nearest grid point
+  (`(c / G).round() * G`). The call returns the shift `ΔO`, a whole multiple
+  of 4,096 m and exactly representable in f32, so the renderer can update
+  persistent data.
+* *Conversion.* A render-space position is `r = (p - O).as_vec3()`: the
+  subtraction happens in f64 and the result is rounded once to f32. This is
+  the only sim-to-render position conversion (ADR 0006).
+* *Views.* All views of a frame (N-view, stereo) share one `O`. View
+  matrices are built in f32 from `c - O`.
+* *Persistent GPU data.* On a rebase, the renderer shifts data that lives in
+  render space across frames by `−ΔO`: GPU particles, cached shadow cascades
+  and static instance buffers. Positions within 8 km of the origin move by
+  at most half an f32 ULP (0.25 mm). Temporal reprojection never shifts
+  stored positions: previous-frame positions are recomputed on the CPU as
+  `p_prev - O_now`.
+* *System change.* A jump to another system resets `O` to the grid point
+  nearest the arrival camera. The renderer treats that frame as a cut, with
+  no temporal history.
+* *Projection.* Rendering uses reverse-Z f32 depth with an infinite far plane
+  (`glam::Mat4::perspective_infinite_reverse_rh`). The near-plane distance is
+  for the Phase 2 renderer ADR to choose. No logarithmic depth is needed at
+  these scales.
+
+=== Precision budgets
+
+Simulation (f64) and, for comparison, what f32 positions would give. The
+"f32 velocity quantum" is one ULP per tick at 120 Hz: the smallest velocity
+an f32 position can express at that distance.
+
+[cols="2,2,2,3",options="header"]
+|===
+| Distance from the origin | f64 spacing | f32 spacing | f32 velocity quantum
+
+| 10 km | 2^-39^ m (1.8 pm) | 2^-10^ m (0.98 mm) | 0.12 m/s
+| 100 km | 2^-36^ m (15 pm) | 2^-7^ m (7.8 mm) | 0.94 m/s
+| 1,000 km | 2^-33^ m (0.12 nm) | 2^-4^ m (62.5 mm) | 7.5 m/s
+| Just inside the bound (2^22^ to 2^23^ m) | 2^-30^ m (0.93 nm) | 2^-1^ m (0.5 m) | 60 m/s
+|===
+
+Per tick at 120 Hz, a ship moves 8.3 mm at 1 m/s (docking), 2.5 m at
+300 m/s (combat) and 83 m at 10 km/s (cruise). With f32 positions, a ship
+creeping at 0.5 m/s 100 km from the star could only move at 0 or 0.94 m/s,
+and slow flight would break beyond about 10 km. With f64 the worst case is
+at the bound: rounding of the position update accumulates to at most about
+0.2 mm over one hour of play (432,000 ticks times half of 0.93 nm), far
+below anything visible or gameplay-relevant.
+
+Rendering (f32 render space):
+
+* Between rebases the camera is within 3,072 m of `O` on each axis, so at
+  most 5,321 m away. Everything within 8,192 m of `O` has an f32 spacing of
+  2^-11^ m (0.49 mm); everything within 16,384 m has 0.98 mm.
+* At 1080p with a 60° vertical field of view, one pixel covers 1.07 mrad,
+  that is 1.07 mm at 1 m. The worst-case rounding of an object relative to
+  the camera (0.49 mm) is therefore below half a pixel for anything at least
+  1 m from the eye. That holds for a VR headset of similar angular
+  resolution too (PD-10).
+* A planet at 8,000 km is placed with 0.5 m spacing: 6 × 10^-8^ rad, far
+  below one pixel.
+* At the 10 km/s cruise envelope, steady flight rebases every 4,096 m, that
+  is about 2.4 times per second. Each rebase re-uploads static instance data
+  (a few thousand instances of about 48 bytes) and runs one shift pass over
+  persistent particle data.
+
+=== Rapier crate, features and MSRV
+
+* `[workspace.dependencies]`:
++
+[source,toml]
+----
+rapier3d-f64 = { version = "0.36.1", default-features = false, features = ["dim3", "f64", "alloc", "enhanced-determinism"] }
+----
++
+Only `st-sim` depends on it; the determinism harness reaches it through
+`st-sim`.
+* Parry is used through `rapier3d_f64::parry`, with no direct `parry3d-f64`
+  dependency. That gives one Parry version, with features set by Rapier. If
+  a direct dependency ever becomes necessary, it must use exactly Rapier's
+  Parry version and enable `enhanced-determinism`.
+* Reasons for the features:
+** `dim3` and `f64` select the crate's real type and dimension.
+** `alloc` gives the sets and pipelines. `std` is not needed and stays off
+   (the probe ran without it).
+** `enhanced-determinism` is required by PD-06. ADR 0008 explains why it is
+   necessary but not sufficient.
+** Off: `block-solver` (in the f64 crate's defaults, but its own manifest
+   comment calls it an experimental opt-in that "introduces jitter in the 3D
+   domino demo"); `parallel` (ADR 0008); `simd8` (a compile error together
+   with `enhanced-determinism`); `serde-serialize` (ADR 0009 decides);
+   `debug-render` and `profiler` (not needed).
+* *MSRV.* The workspace MSRV moves from 1.88 to 1.89, because `nalgebra`
+  0.35 and `wide` 1.x require it. 1.89 is below the current NixOS stable
+  `rustc` (1.95.0), as ADR 0001 requires. The PR that adds `rapier3d-f64`
+  also:
+** sets `rust-version = "1.89"` in `[workspace.package]`;
+** changes the `msrv` job to `rustup toolchain install 1.89.0 --profile minimal`
+   and `cargo +1.89.0 build --workspace --all-targets --locked`;
+** adds this row to the ADR 0002 register:
++
+[cols="2,2,2,5",options="header"]
+|===
+| Crate | Requirement | Admitted for | Notes
+
+| `rapier3d-f64`
+| `0.36` (0.36.1 at admission)
+| Phase 1, `st-sim` only (ADR 0007, ADR 0008)
+| `default-features = false`, features `dim3`, `f64`, `alloc`,
+  `enhanced-determinism`. Parry only through `rapier3d_f64::parry`.
+  Raises the MSRV to 1.89 (nalgebra 0.35, wide 1.x).
+|===
+
+== Alternatives considered
+
+f32 everywhere, with a floating origin that also rebases the physics world::
+  Every rebase moves all bodies and contact caches at a tick boundary. That
+  is a simulation-state mutation, which must then be bit-identical on every
+  platform. One origin also cannot serve two pilots 1,000 km apart in the
+  same system (N pilots, PD-04, and a future dedicated server). f32 still
+  quantises slow flight near the origin's limits (table above).
+Sectors (zones) with local f32 coordinates and one physics world per sector::
+  Projectiles, collisions and sensor queries across sector boundaries,
+  bodies straddling a boundary, and handover logic all land in `st-sim`.
+  This is complexity f64 makes unnecessary.
+Fixed-point integer positions (for example `i64` micrometres) with local float physics::
+  Rapier has no fixed-point mode, so every tick would re-derive local
+  frames. That is exact but heavy; f64 already gives nanometre spacing.
+`rapier3d` (f32) with system frames kept small::
+  PD-26 puts bodies 60 to 240 km apart. At those distances f32 spacing is 4
+  to 16 mm and the velocity quantum 0.5 to 2 m/s, which visibly breaks
+  docking and slow flight.
+Render origin moved to the camera every frame::
+  Best precision near the camera, but every persistent GPU buffer would be
+  shifted every frame by a non-representable amount, accumulating error. The
+  grid origin keeps persistent data stable between rebases at 0.49 mm
+  precision.
+Double-single (high and low f32) positions on the GPU::
+  More shader work and complexity than needed when the CPU produces render
+  space once per frame. Reconsider only if GPU-resident world data that
+  cannot be shifted grows large.
+f64 on the GPU::
+  Not available on WebGPU or Metal, and 16 to 64 times slower where it is.
+Logarithmic depth::
+  Not needed with reverse-Z float depth at these distances.
+
+== Consequences
+
+* Simulation code never thinks about origins; positions are plain `DVec3`
+  values in the system frame. A dedicated server or several distant pilots
+  need nothing extra.
+* The renderer owns rebasing (`st_math::RenderOrigin`), including the shift
+  of persistent GPU data and the history cut on system change. This is
+  Phase 2 work.
+* Physics costs about 15 to 20 % more than f32 (measured on the probe; about
+  0.2 ms per tick for 200 ships natively). Body state takes twice the memory,
+  a few hundred kilobytes in total. wasm32 runs f64 natively.
+* The MSRV becomes 1.89 with Rapier (ADR 0001 and ADR 0003 amended).
+* About 22 more crates in `Cargo.lock`, all licence-clean.
+* The validity bound and the speed envelope are engineering assumptions.
+  Content that exceeds them needs this ADR revisited, though f64 itself
+  would not be the limit.
+* *Product questions (not decided here):* (1) whether the speed envelope
+  (normal at most 1,000 m/s, cruise at most 10 times, systems about 2,000 km
+  in radius) fits the intended feel; (2) what happens when a ship reaches the
+  edge of a system (a soft boundary, a forced turn-back, or nothing).
+* Revisit if PD-26 changes to realistic scale (f64 still holds, but the
+  render rules and the bound need review), or if Rapier or Parry drop the
+  f64 crates.
+
+== References
+
+* PD-01, PD-04, PD-06, PD-10, PD-11 and PD-26 in `docs/decisions/`
+* Rapier: https://crates.io/crates/rapier3d-f64, https://docs.rs/rapier3d-f64/0.36.1/
+* nalgebra 0.35.0: https://crates.io/crates/nalgebra
+* wide: https://crates.io/crates/wide
+* wgpu `Features::SHADER_F64`: https://docs.rs/wgpu-types/30.0.1/wgpu_types/struct.Features.html
+* glTF coordinate system: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#coordinate-system-and-units
+* xref:0001-toolchain-msrv-nix.adoc[ADR 0001], xref:0002-dependency-policy.adoc[ADR 0002],
+  xref:0003-ci-design.adoc[ADR 0003], xref:0006-math-library-boundary.adoc[ADR 0006],
+  xref:0008-determinism-implementation.adoc[ADR 0008], xref:0010-data-schema-versioning.adoc[ADR 0010]
+* Jira: SPAC-104

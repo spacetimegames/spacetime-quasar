@@ -5,7 +5,9 @@ toc::[]
 
 == Status
 
-Accepted
+Accepted. The MSRV (1.88) is amended by
+xref:0007-large-world-coordinates.adoc[ADR 0007]: it becomes 1.89 in the PR
+that adds `rapier3d-f64`.
 
 == Date
 
