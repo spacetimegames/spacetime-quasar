@@ -12,31 +12,49 @@
 //! dependency, and the glue is compiled out on `wasm32` and without the
 //! `hot-reload` feature.
 //!
+//! # The feature is for development builds
+//!
+//! The cargo feature `hot-reload` is off by default (ADR 0010: release and Nix
+//! builds carry no watcher). The application enables it only in dev builds,
+//! for example through its own `hot-reload` feature. This crate's tests turn
+//! it on through a dev-dependency on itself.
+//!
 //! # How a reload goes
 //!
 //! The main loop calls [`HotData::poll`] once per frame with the current time.
 //! A poll does a bounded slice of watcher work and never sleeps. When the
-//! watcher releases a batch of changed files, every file is read through
-//! `st-platform`, then parsed, migrated and validated through `st-data`. The
-//! batch is all or nothing:
+//! watcher releases a batch of changed files, the files are read through
+//! `st-platform` synchronously, on the calling thread, then parsed, migrated
+//! and validated through `st-data`.
 //!
-//! * If every file passes, a new [`DataSnapshot`] replaces the old one in one
-//!   step and the generation increases. Consumers hold `Arc<DataSnapshot>`
-//!   values, so one that is still holding the old snapshot keeps seeing the
-//!   old, complete data; it never sees a mix.
-//! * If any file fails (it does not read, does not parse, fails validation,
-//!   or was removed), the previous snapshot stays in use, [`HotData::poll`]
-//!   returns a [`ReloadError`] with every diagnostic, and the batch is handed
-//!   back to the watcher with `Watcher::requeue`. A half-written file is the
-//!   typical cause: it fails once, and the editor's next write releases a new
-//!   batch that carries the rest of the rejected one with it, so a later valid
-//!   edit recovers.
+//! What is atomic: the files of one batch that are present and valid become
+//! visible together, in one new [`DataSnapshot`] and one generation, or not at
+//! all. A consumer holds `Arc<DataSnapshot>` values, so one still holding the
+//! old snapshot keeps seeing the old, complete data; it never sees a mix.
+//!
+//! * If every present file of the batch reads, parses and validates, the
+//!   snapshot is swapped.
+//! * If any present file fails (syntax, validation, read error), no value of
+//!   that batch changes and a [`ReloadError`] names every problem. The files
+//!   that were fine are handed back to the watcher with
+//!   `Watcher::requeue_changes`, so the fix to the bad file brings them along.
+//!   The bad file is reported once and not requeued: it comes back when it is
+//!   edited again, so it never holds back later edits to other files.
+//! * A read error that may be transient (not found after release, permission
+//!   denied, other I/O: a file still being written) is requeued and tried
+//!   again with the next batch, at most [`MAX_READ_RETRIES`] times; after that
+//!   it is reported and dropped. A too-large file is not retried.
+//! * A removed or renamed-away file keeps its last value, is reported once as
+//!   `missing-source`, and is never requeued. It does not hold back the other
+//!   files of its batch, and creating the path again loads it.
+//!   Remove-then-create or rename-over (how editors save) ends in a reload.
 //! * A file whose content hash did not change produces no event, and a batch
 //!   with no hash change at all produces nothing.
 
 use st_data::{Code, ContentHash, Diagnostic, Loaded, Loader, Schema, Validate};
 use st_platform::{
-    ChangeBatch, ChangeKind, FsError, FsErrorKind, Watcher, WatcherConfig, list_files, read_file_as,
+    Change, ChangeBatch, ChangeKind, FileSource, FsError, FsErrorKind, Watcher, WatcherConfig,
+    list_files, read_file_as,
 };
 use st_time::Nanos;
 use std::collections::BTreeMap;
@@ -168,6 +186,34 @@ impl fmt::Display for ReloadError {
 
 impl Error for ReloadError {}
 
+/// What one released batch did: a swap, problems, or both.
+///
+/// ```
+/// use st_game::ReloadReport;
+///
+/// fn log(report: &ReloadReport) {
+///     if let Some(r) = &report.reloaded {
+///         println!("data generation {}: {} file(s) changed", r.generation, r.events.len());
+///     }
+///     if let Some(e) = &report.error {
+///         eprintln!("{e}");
+///     }
+/// }
+/// # let _ = log;
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReloadReport {
+    /// Set when a new snapshot was swapped in.
+    pub reloaded: Option<Reloaded>,
+    /// Set when something was wrong; the previous value of each file at fault
+    /// stays in use.
+    pub error: Option<ReloadError>,
+}
+
+/// How often a file whose read keeps failing is tried again before it is
+/// reported for the last time and dropped.
+pub const MAX_READ_RETRIES: u32 = 3;
+
 /// A directory of `.ron` files of one schema, kept current while the game
 /// runs. See the module documentation for the rules.
 ///
@@ -194,6 +240,8 @@ pub struct HotData<T> {
     watcher: Watcher,
     loader: Loader,
     current: Arc<DataSnapshot<T>>,
+    // Failed reads per source name, for the bounded retry.
+    attempts: BTreeMap<String, u32>,
 }
 
 impl<T: Schema + Validate> HotData<T> {
@@ -254,6 +302,7 @@ impl<T: Schema + Validate> HotData<T> {
         Ok(HotData {
             watcher,
             loader,
+            attempts: BTreeMap::new(),
             current: Arc::new(DataSnapshot {
                 generation: 0,
                 files,
@@ -275,55 +324,99 @@ impl<T: Schema + Validate> HotData<T> {
     /// Does one slice of watcher work; call once per frame with a monotonic
     /// time (for example `st_platform::Clock::now`). Never sleeps.
     ///
-    /// Returns `None` when no batch is due or the batch changed no value,
-    /// `Some(Ok(_))` when a new snapshot was swapped in, and `Some(Err(_))`
-    /// when the batch was rejected and the previous snapshot stays.
-    pub fn poll(&mut self, now: Nanos) -> Option<Result<Reloaded, ReloadError>> {
-        let batch = self.watcher.poll(now)?;
-        match self.apply(&batch) {
-            Ok(None) => None,
-            Ok(Some(reloaded)) => Some(Ok(reloaded)),
-            Err(error) => {
-                // Hand the batch back so a later fix brings its other files
-                // along, instead of the rejected files being forgotten.
-                self.watcher.requeue(&batch);
-                Some(Err(error))
-            }
-        }
+    /// Returns `None` when no batch is due or the batch changed nothing.
+    /// Otherwise the [`ReloadReport`] says whether a new snapshot was swapped
+    /// in, whether problems were found, or both (see the module
+    /// documentation for exactly what is atomic).
+    ///
+    /// The files of a released batch are read synchronously, on the calling
+    /// thread, inside this call. The cost is bounded by the size of the batch
+    /// (the files an editor saved together), not by the size of the tree.
+    pub fn poll(&mut self, now: Nanos) -> Option<ReloadReport> {
+        self.poll_with(now, &Change::read)
     }
 
-    fn apply(&mut self, batch: &ChangeBatch) -> Result<Option<Reloaded>, ReloadError> {
+    fn poll_with(
+        &mut self,
+        now: Nanos,
+        read: &dyn Fn(&Change) -> Result<FileSource, FsError>,
+    ) -> Option<ReloadReport> {
+        let batch = self.watcher.poll(now)?;
+        self.apply(&batch, read)
+    }
+
+    fn apply(
+        &mut self,
+        batch: &ChangeBatch,
+        read: &dyn Fn(&Change) -> Result<FileSource, FsError>,
+    ) -> Option<ReloadReport> {
         let mut diags = Vec::new();
-        let mut loaded: BTreeMap<String, Loaded<T>> = BTreeMap::new();
+        let mut loaded: Vec<(&Change, Loaded<T>)> = Vec::new();
+        // Files that make the batch unusable, and the ones to try again.
+        let mut rejected = false;
+        let mut retry: Vec<&Change> = Vec::new();
         for change in batch.changes() {
+            let name = change.name();
             if change.kind() == ChangeKind::Removed {
-                // A removed file keeps its last value until restart (ADR 0010).
-                if self.current.files.contains_key(change.name()) {
+                // Reported once, never requeued, and it does not hold back the
+                // other files: the last value stays in use (ADR 0010).
+                self.attempts.remove(name);
+                if self.current.files.contains_key(name) {
                     diags.push(Diagnostic::new(
-                        change.name(),
+                        name,
                         Code::MissingSource,
-                        "the file was removed; its last value stays in use until restart",
+                        "the file was removed; its last value stays in use until it is created again",
                     ));
                 }
                 continue;
             }
-            match change.read() {
-                Err(e) => diags.push(read_diagnostic(&e)),
-                Ok(source) => match self.loader.load::<T>(source.name(), source.bytes()) {
-                    Ok(l) => {
-                        loaded.insert(change.name().to_owned(), l);
+            match read(change) {
+                Err(e) => {
+                    rejected = true;
+                    diags.push(read_diagnostic(&e));
+                    if is_transient(&e) {
+                        let n = self.attempts.entry(name.to_owned()).or_insert(0);
+                        *n += 1;
+                        if *n <= MAX_READ_RETRIES {
+                            retry.push(change);
+                        } else {
+                            self.attempts.remove(name);
+                        }
+                    } else {
+                        self.attempts.remove(name);
                     }
-                    Err(d) => diags.extend(d),
-                },
+                }
+                Ok(source) => {
+                    self.attempts.remove(name);
+                    match self.loader.load::<T>(source.name(), source.bytes()) {
+                        Ok(l) => loaded.push((change, l)),
+                        Err(d) => {
+                            rejected = true;
+                            diags.extend(d);
+                        }
+                    }
+                }
             }
         }
-        if !diags.is_empty() {
-            return Err(ReloadError::new(diags));
+
+        let error = (!diags.is_empty()).then(|| ReloadError::new(diags));
+        if rejected {
+            // No value changes. The files that were fine are handed back, so
+            // fixing the bad file brings them along; the bad file itself is
+            // reported once and comes back only when it is edited again
+            // (transient read failures are retried a bounded number of times).
+            let innocent = loaded.iter().map(|(c, _)| *c);
+            self.watcher.requeue_changes(innocent.chain(retry));
+            return error.map(|error| ReloadReport {
+                reloaded: None,
+                error: Some(error),
+            });
         }
 
         let mut files = self.current.files.clone();
         let mut events = Vec::new();
-        for (name, l) in loaded {
+        for (change, l) in loaded {
+            let name = change.name().to_owned();
             let old_hash = files.get(&name).map(|old| old.hash);
             if old_hash == Some(l.hash) {
                 continue;
@@ -335,13 +428,18 @@ impl<T: Schema + Validate> HotData<T> {
             });
             files.insert(name, Arc::new(l));
         }
-        if events.is_empty() {
-            return Ok(None);
+        let reloaded = if events.is_empty() {
+            None
+        } else {
+            let generation = self.current.generation + 1;
+            // One pointer assignment: a consumer has the old snapshot or the new.
+            self.current = Arc::new(DataSnapshot { generation, files });
+            Some(Reloaded { generation, events })
+        };
+        if reloaded.is_none() && error.is_none() {
+            return None;
         }
-        let generation = self.current.generation + 1;
-        // One pointer assignment: a consumer has the old snapshot or the new.
-        self.current = Arc::new(DataSnapshot { generation, files });
-        Ok(Some(Reloaded { generation, events }))
+        Some(ReloadReport { reloaded, error })
     }
 }
 
@@ -366,6 +464,11 @@ fn relative_name(root: &Path, path: &Path) -> String {
 }
 
 fn read_diagnostic(e: &FsError) -> Diagnostic {
+    let code = if matches!(e.kind(), FsErrorKind::TooLarge { .. }) {
+        Code::TooLarge
+    } else {
+        Code::MissingSource
+    };
     let what = match e.kind() {
         FsErrorKind::NotFound => "the file does not exist",
         FsErrorKind::PermissionDenied => "permission denied",
@@ -373,6 +476,94 @@ fn read_diagnostic(e: &FsError) -> Diagnostic {
         FsErrorKind::Unsupported => "this target cannot read files",
         _ => "the file could not be read",
     };
-    Diagnostic::new(e.source_name(), Code::MissingSource, what)
+    Diagnostic::new(e.source_name(), code, what)
         .with_help("the previous value stays in use; save the file again")
+}
+
+/// Whether a failed read may succeed on a later try: a file that is still
+/// being written, locked by an editor, or replaced under us.
+fn is_transient(e: &FsError) -> bool {
+    matches!(
+        e.kind(),
+        FsErrorKind::NotFound | FsErrorKind::PermissionDenied | FsErrorKind::Other
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+    use st_data::{Genesis, MigrationError, Validator};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct N {
+        v: u32,
+    }
+
+    impl Schema for N {
+        const KIND: &'static str = "n";
+        const VERSION: u32 = 1;
+        type Previous = Genesis;
+        fn migrate(p: Genesis) -> Result<Self, MigrationError> {
+            match p {}
+        }
+    }
+
+    impl Validate for N {
+        fn validate(&self, _: &mut Validator) {}
+    }
+
+    /// A read that fails the way a half-written, locked file does.
+    fn failing_read(_: &Change) -> Result<FileSource, FsError> {
+        read_file_as("no/such/dir/x.ron", "x.ron")
+    }
+
+    #[test]
+    fn a_failing_read_is_retried_a_bounded_number_of_times_then_dropped() {
+        let dir = std::env::temp_dir().join(format!("st-game-unit-retry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = WatcherConfig::new().quiet_period(Nanos::ZERO);
+        let mut hot = HotData::<N>::open_with(&dir, Loader::new(), cfg).unwrap();
+        let mut t = Nanos::from_secs(1);
+        let step = |hot: &mut HotData<N>, text: &str, t: &mut Nanos| {
+            std::fs::write(dir.join("x.ron"), text).unwrap();
+            for _ in 0..1000 {
+                *t = Nanos::from_secs(t.as_nanos() / 1_000_000_000 + 1);
+                if let Some(r) = hot.poll_with(*t, &failing_read) {
+                    return r;
+                }
+            }
+            panic!("no report");
+        };
+        // Each edit releases a batch whose read fails; the requeued change
+        // rides along with the next one, until the bound is reached.
+        let mut text = String::from("(kind: \"n\", version: 1, data: (v: 1))");
+        for _ in 0..MAX_READ_RETRIES {
+            let r = step(&mut hot, &text, &mut t);
+            assert!(r.error.is_some() && r.reloaded.is_none());
+            assert!(hot.attempts.get("x.ron").copied().unwrap_or(0) > 0);
+            text.push(' ');
+        }
+        // The attempt after the bound is reported and dropped.
+        let r = step(&mut hot, &text, &mut t);
+        assert!(r.error.is_some());
+        assert!(hot.attempts.is_empty());
+        assert_eq!(hot.generation(), 0);
+
+        // Dropped means a real read works again on the next edit.
+        text.push(' ');
+        std::fs::write(dir.join("x.ron"), &text).unwrap();
+        let mut report = None;
+        for _ in 0..1000 {
+            t = Nanos::from_secs(t.as_nanos() / 1_000_000_000 + 1);
+            if let Some(r) = hot.poll(t) {
+                report = Some(r);
+                break;
+            }
+        }
+        assert_eq!(report.unwrap().reloaded.unwrap().generation, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
