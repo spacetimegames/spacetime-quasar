@@ -1,9 +1,11 @@
 //! Commands: the only way anything outside `st-sim` changes simulation state.
 //!
-//! The types follow ADR 0009 ("Commands"). The wire encoding and replay files
-//! of that ADR are not built yet, so a command log here is a `Vec<Command>`.
+//! The types follow ADR 0009 ("Commands"). The wire encoding is in [`wire`] and
+//! the replay files that use it are in [`crate::replay`].
 
 use crate::hash::{HashError, StateHash, StateHasher};
+
+pub mod wire;
 
 /// Largest number of commands one tick may carry (ADR 0009).
 pub const MAX_COMMANDS_PER_TICK: usize = 1024;
@@ -135,7 +137,14 @@ pub enum StepError {
         /// Index of the offending command.
         index: usize,
     },
-    /// The payload is out of range (for example an axis of `-32768`).
+    /// The pilot is controlled inside the simulation (by AI), so it takes no
+    /// external commands.
+    NotExternal {
+        /// Index of the offending command.
+        index: usize,
+    },
+    /// The payload is out of range (for example an axis of `-32768`) or
+    /// longer than [`wire::MAX_PAYLOAD_BYTES`].
     InvalidPayload {
         /// Index of the offending command.
         index: usize,
@@ -144,6 +153,12 @@ pub enum StepError {
     TooManyCommands {
         /// How many were passed.
         count: usize,
+    },
+    /// The tick's commands together are larger than [`wire::MAX_TICK_BYTES`]
+    /// (each counts its payload plus [`wire::FRAME_OVERHEAD`]).
+    TickTooLarge {
+        /// Index of the command that takes the total over the limit.
+        index: usize,
     },
     /// The floating-point environment is not round-to-nearest-even without
     /// flush-to-zero (`st_math::det::fp_env_is_default()` is false), so the
@@ -166,7 +181,20 @@ impl core::fmt::Display for StepError {
             StepError::WrongSource { index } => {
                 write!(f, "command {index}: kind not valid from this pilot")
             }
+            StepError::NotExternal { index } => {
+                write!(
+                    f,
+                    "command {index}: the pilot is controlled by the simulation"
+                )
+            }
             StepError::InvalidPayload { index } => write!(f, "command {index}: invalid payload"),
+            StepError::TickTooLarge { index } => {
+                write!(
+                    f,
+                    "command {index}: the tick's commands exceed {} bytes",
+                    wire::MAX_TICK_BYTES
+                )
+            }
             StepError::FloatEnvironment => {
                 f.write_str("the floating-point environment is not the default")
             }

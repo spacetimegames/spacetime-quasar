@@ -7,9 +7,13 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+st-data = { path = "../st-data" }
 st-math = { path = "../st-math" }
 st-rng = { path = "../st-rng" }
 st-time = { path = "../st-time" }
+
+# The replay header is an ADR 0010 envelope (ADR 0009).
+serde.workspace = true
 
 [lints]
 workspace = true

@@ -141,6 +141,13 @@
 //! no `std::hash::Hash`-based decision, and no `usize` in anything hashed;
 //! lengths are `u64`. Files are never enumerated here.
 //!
+//! # Writing
+//!
+//! [`write_envelope`] is the inverse of loading for one value: it writes the
+//! envelope of a [`Schema`] type's kind and current version as RON text that
+//! loads back to the same value with the same content hash. Replay headers
+//! and, later, shipyard designs and saves use it.
+//!
 //! # Not in this crate
 //!
 //! File access, directory watching and hot reload live elsewhere
@@ -208,6 +215,7 @@ mod path;
 mod schema;
 mod unique_map;
 mod validate;
+mod write;
 
 pub use canon::{EncodeError, canonical_bytes};
 pub use diagnostic::{Code, Diagnostic, Position, Span};
@@ -219,3 +227,4 @@ pub use path::{DataPath, Segment};
 pub use schema::{ChainError, Genesis, MigrationError, Schema, check_chain, is_valid_kind};
 pub use unique_map::UniqueMap;
 pub use validate::{Validate, Validator, Violation};
+pub use write::{WriteError, write_envelope};

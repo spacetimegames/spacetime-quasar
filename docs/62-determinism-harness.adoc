@@ -9,7 +9,9 @@ Status: minimal simulation, complete comparison.
 `st-sim` has a handful of bodies and one command kind, and the harness has five scenarios: three simulation scenarios, `math-kernels` and `data-fixtures` (SPAC-126).
 The four producer jobs upload their output, the `determinism` job compares the four files with each other and with the reference, the leak detector runs on x86_64 Linux, and `--dump-tick` writes the canonical hash input for diffing (SPAC-125).
 
-From ADR 0009, these are not built yet: replay files (`st_sim::replay`) and replay scenarios, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, session commands, the `StepError` variants `NotExternal` and `TickTooLarge`, and the payload (1 MiB) and per-tick (2 MiB) byte limits. The three simulation scenarios are interim and use different names from the scenarios in ADR 0008 (`physics-swarm` and `combat-60s` are not built yet).
+Replay files are built (SPAC-127, xref:adr/0009-command-log-and-replay-format.adoc[ADR 0009]): `st_sim::replay`, the command wire encoding with golden bytes and its tag table with the reserved tags, `SIM_VERSION` and its pin file, the `StepError` variants `NotExternal` and `TickTooLarge`, the payload (1 MiB) and per-tick (2 MiB) byte limits, `--replay`, `--force` and exit status 4 (see <<_replays>>).
+Not built yet from ADR 0009: session commands (their tags are reserved), AI pilots, and the viewer in `st-game` (SPAC-121).
+The three simulation scenarios are interim and use different names from the scenarios in ADR 0008 (`physics-swarm` and `combat-60s` are not built yet).
 
 Commands tagged `[ci-tested]` are the ones the CI jobs run (CI only differs in the output file name and in providing wasmtime outside the dev shell); run 38130979625 passed the harness, the uploads and the `determinism` compare job on all four targets. Untagged commands were run by an agent inside `nix develop` on the reference dev machine (Linux x86_64).
 
@@ -46,6 +48,7 @@ The tick is zero-padded to 8 digits and the hash is 16 lower-case hex digits.
 Lines are sorted and end with LF.
 Checkpoints are tick 0, every 120 ticks (1 s) and the final tick.
 The hash is FNV-1a 64 over the canonical byte stream of ADR 0008 (format version 1).
+Each scenario with commands also has one line `<scenario>.replay <final tick> <hash>` (for example `solo-burn.replay 00000600 ...`): the hash is FNV-1a 64 over the bytes of its recorded replay, so the four platforms compare the encoder's output as well (see <<_replays>>).
 
 `math-kernels` hashes one stream per tick, `STQK` header (format version, tick, seed and the hash of the previous tick) then the sections `DETM`, `ORBT` and `INTP` (tick 0 has `EDGE` instead), and the tick's hash is the checkpoint value, so a checkpoint covers every earlier tick.
 It writes `f64` results as bit patterns, and a result that is a `Result` or an `Option` as a tag byte and the value or an error code.
@@ -73,7 +76,9 @@ diff -u tools/determinism/reference.txt determinism-linux-x86_64.txt
 
 Options: `--scenario <name>` runs one scenario, and `--checkpoint-every <n>` takes a hash every `n` ticks to help find the tick where two platforms diverge (CI never changes it).
 `--dump-tick <t> --dump <path>` also writes the canonical hash input at tick `t` (see <<_find_where_two_targets_diverge,below>>); the two options go together.
-Exit status: 0 success, 1 usage or I/O error (including a `--dump-tick` past the end of every selected scenario), 2 a scenario failed (for example a `HashError`: a NaN in the state), 3 the leak detector saw a platform libm call outside its allow-list.
+`--replay <file>` plays a replay file instead of the scenarios, and `--force` goes with it (see <<_replays>>).
+Exit status: 0 success, 1 usage or I/O error (including a `--dump-tick` past the end of every selected scenario), 2 a scenario failed (for example a `HashError`: a NaN in the state, or the replay writer refusing what a scenario did), 3 the leak detector saw a platform libm call outside its allow-list, 4 a replay did not verify (it is invalid or damaged, from another simulation version, refused by the simulation, or a checkpoint hash differs).
+Status 4 is reported after the leak check, so 3 wins when both apply.
 
 Run the tests, which include the same comparison:
 
@@ -81,6 +86,62 @@ Run the tests, which include the same comparison:
 ----
 cargo test -p determinism -p st-sim -p st-rng -p st-data -p st-math -p st-time
 ----
+
+== Replays
+
+Replays follow xref:adr/0009-command-log-and-replay-format.adoc[ADR 0009] and PD-33 (replays are version-locked and a player feature; the viewer is SPAC-121).
+`st_sim::replay` writes and reads `.stqreplay` files as bytes and does no I/O; the harness, a tool, uses `std::fs`.
+
+What the harness does for each scenario with commands (`solo-burn`, `orbit-coast`, `swarm-controls`):
+
+. runs it live and prints the usual checkpoint lines;
+. runs it again through `ReplayWriter` with the constant harness header (`build: "determinism"`, the ADR 0010 hash of the empty data set, no local pilots, so the bytes depend only on simulation behaviour and the encoding), and requires that it ends in the live run's final state;
+. prints `<scenario>.replay <final tick> <FNV-1a 64 of the replay bytes>`;
+. reads the bytes back through `ReplayReader` and plays them in a fresh `Sim`, comparing the state hash at every segment end.
+A mismatch is a `Desync` report and exit status 4.
+
+Play a replay file as a scenario named after the file stem:
+
+[source,sh]
+----
+cargo run --release --locked -p determinism -- --out replay-hashes.txt --replay session.stqreplay
+cargo run --release --locked -p determinism -- --out replay-hashes.txt --replay session.stqreplay --checkpoint-every 1
+cargo run --release --locked -p determinism -- --out replay-hashes.txt --replay old.stqreplay --force
+----
+
+The first verifies the file and writes its hash every 120 ticks.
+The second writes one hash per tick: on two platforms, the first differing line of the two outputs is the first divergent tick.
+A desync still writes the hashes of the segment that failed, then exits with status 4 and prints where: the failed checkpoint and the last one that matched.
+The third opens the file without comparing the simulation version, the state hash format and the data set (`PlayContext::check_versions` false), to see how a change affects an old replay.
+These lines never enter `reference.txt`.
+`--replay` replaces the scenarios, so it does not combine with `--scenario` or `--dump-tick`, and `--force` is valid only with it.
+
+A build refuses a replay recorded by another simulation version, with a message that names the recording build (read from the header, which every build reads):
+
+----
+Recorded with spacetime-quasar 0.3.0 (simulation version 7). This build plays simulation version 9 only.
+----
+
+A damaged file (a failed chunk check) is a different error from a desync, so a bad copy never looks like a determinism bug.
+A file that was cut short plays up to its last complete segment.
+
+=== The simulation version and its pin
+
+`st_sim::SIM_VERSION` is bumped by any change that moves a pinned line of `reference.txt`, changes a command kind, its payload or encoding, the setup encoding, the `replay` container version, the `st-rng` algorithm, or the version of a simulation dependency in `Cargo.lock`.
+`tools/determinism/sim-version.txt` pins it, append-only.
+Each line is `<sim version> <FNV-1a 64 of the pinned lines> <FNV-1a 64 of the wire golden bytes>`.
+The pinned lines are the lines of `reference.txt` of every code-defined scenario (all of them except `data-fixtures`, whose content is data) and their `.replay` lines, joined with LF and no final LF; the ADR names `physics-swarm`, `math-kernels` and `combat-60s`, which do not exist yet, so the pin covers the scenarios that do.
+The wire golden bytes are `st_sim::command::wire::golden_bytes()`.
+The test `sim_version_pin` (`cargo test`, every platform) fails with the line to append when the simulation, the encoding or the reference changes without a new line; the fix is to bump `SIM_VERSION` and append that line.
+Review checks that a line was added and no earlier line was edited.
+
+`snapshot_continuity` (also in `tools/determinism/tests`) clones the `Sim` at tick 240 of each scenario, continues both to tick 600 or the end, and requires equal checkpoint hashes: a snapshot is `Sim::clone()`.
+
+=== Tests
+
+In `st-sim`: wire round trips and golden bytes, varint edge cases (overlong, overflow), counts bounded by the bytes left, record and play of every scenario, canonical re-encoding, truncation at every byte offset of a small file, a flipped bit at every offset (corruption, never a desync), and 10,000 seeded random mutations of a valid file (a third with the chunk checks recomputed, so the decoders behind them are reached) that must each return an error or a valid log, never panic.
+In `tools/determinism`: `--replay`, `--force`, exit status 4, and status 3 winning over 4 (`tests/cli.rs`).
+In `st-data`: the envelope writer loads back to the same value and content hash.
 
 == Run it on wasm32-wasip1
 
@@ -108,6 +169,9 @@ Regenerate the reference, review the diff, and say in the PR description why it 
 cargo run --release --locked -p determinism -- --out tools/determinism/reference.txt
 git diff tools/determinism/reference.txt
 ----
+
+A change that moves a line of a code-defined scenario also needs a new `SIM_VERSION` (see <<_the_simulation_version_and_its_pin>>); the test `sim_version_pin` prints the line to append to `tools/determinism/sim-version.txt`.
+The reference is regenerated with the version bump in the same commit, because the pin hashes the reference.
 
 A hash that differs on one platform only is a determinism bug, not a reason to regenerate.
 Find where the platforms diverge as described next.

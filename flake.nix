@@ -71,6 +71,8 @@
                 "rustfmt.toml"
                 # Expected determinism-harness output, read with `include_str!`.
                 "reference.txt"
+                # The SIM_VERSION pin (ADR 0009), read with `include_str!`.
+                "sim-version.txt"
               ];
             name = "source";
           };

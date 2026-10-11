@@ -11,26 +11,36 @@
 //! and `data-fixtures`, the `st-data` golden fixtures as one data set
 //! ([`fixtures`]).
 //!
+//! Replay files are scenarios too (ADR 0009, [`replays`]). Every scenario that
+//! has commands is recorded to a replay with a constant header, read back and
+//! played in a fresh simulation, and one more line,
+//! `<scenario>.replay <final tick> <hash of the replay bytes>`, makes the
+//! platforms compare the encoder's output. [`replays::play_file`] plays a
+//! replay file (the binary's `--replay`).
+//!
 //! Boundary: a sim crate under ADR 0008. It contains no simulation logic; the
 //! scenarios live in [`st_sim::scenarios`], except `data-fixtures`, which
-//! needs `st-data`.
+//! needs `st-data`. File access is in the binary only.
 //!
 //! The binary adds the leak detector (module `leak`, x86_64 Linux only) and
 //! [`dump`], the canonical hash input at one tick.
 //!
-//! Non-goals (not yet built): replay files as scenarios.
+//! Non-goals: the replay viewer and sharing of replays (SPAC-121).
 //!
 //! # Example
 //!
 //! ```
 //! let text = determinism::run(Some("solo-burn"), 120)?;
 //! assert!(text.starts_with("solo-burn 00000000 "));
+//! assert!(text.contains("\nsolo-burn.replay 00000600 "));
 //! # Ok::<(), determinism::Error>(())
 //! ```
 
 pub mod fixtures;
+pub mod replays;
 
 use st_sim::DumpLine;
+use st_sim::replay::ReplayError;
 use st_sim::scenarios::{self, Checkpoint, MathKernels, RunError, Scenario};
 
 /// The harness failed.
@@ -49,6 +59,23 @@ pub enum Error {
     },
     /// The `data-fixtures` scenario failed.
     Fixtures(fixtures::FixtureError),
+    /// The replay writer refused what a scenario did.
+    Record {
+        /// The scenario.
+        scenario: &'static str,
+        /// What went wrong.
+        error: ReplayError,
+    },
+    /// The recording of a scenario ends in another state than the live run.
+    LiveMismatch(&'static str),
+    /// A replay did not verify: it is invalid, the simulation refused it or
+    /// its hashes differ (exit status 4).
+    Replay {
+        /// The scenario, or the stem of the replay file.
+        scenario: String,
+        /// What went wrong.
+        error: ReplayError,
+    },
 }
 
 impl core::fmt::Display for Error {
@@ -58,6 +85,17 @@ impl core::fmt::Display for Error {
             Error::TickPastEnd(t) => write!(f, "no selected scenario reaches tick {t}"),
             Error::Run { scenario, error } => write!(f, "scenario `{scenario}`: {error}"),
             Error::Fixtures(e) => write!(f, "scenario `{}`: {e}", fixtures::NAME),
+            Error::Record { scenario, error } => {
+                write!(
+                    f,
+                    "scenario `{scenario}`: cannot record the replay: {error}"
+                )
+            }
+            Error::LiveMismatch(scenario) => write!(
+                f,
+                "scenario `{scenario}`: the recorded run ends in another state than the live run"
+            ),
+            Error::Replay { scenario, error } => write!(f, "replay `{scenario}`: {error}"),
         }
     }
 }
@@ -178,19 +216,36 @@ fn selected(only: Option<&str>) -> Result<Vec<Entry>, Error> {
     Ok(entries)
 }
 
-/// Runs one scenario (`only`) or all of them and returns the sorted report.
+/// The report of a run, and the replays that failed to verify.
+#[derive(Debug)]
+pub struct Report {
+    /// The sorted report: one line per checkpoint and per `.replay` file.
+    pub text: String,
+    /// The scenarios whose recording did not play back to the same hashes.
+    /// The binary maps a non-empty list to exit status 4, after the leak check.
+    pub replay_failures: Vec<Error>,
+}
+
+/// Runs one scenario (`only`) or all of them, records the ones with commands
+/// to replays and plays those back (ADR 0009), and returns the report.
 ///
 /// `checkpoint_every` only changes how often a hash is taken, which helps to
 /// localise a divergence; the reference file is for 120 (the default of the
-/// binary). Tick 0 and the final tick are always included.
+/// binary). Tick 0 and the final tick are always included. The replays always
+/// checkpoint every 120 ticks, as the format requires.
 ///
 /// # Errors
 ///
-/// [`Error`] for an unknown scenario name or a scenario that fails.
-pub fn run(only: Option<&str>, checkpoint_every: u64) -> Result<String, Error> {
+/// [`Error`] for an unknown scenario name or a scenario that fails. A replay
+/// that does not verify is not an `Err` here: it is in
+/// [`Report::replay_failures`], and its lines are still in the text.
+pub fn run_report(only: Option<&str>, checkpoint_every: u64) -> Result<Report, Error> {
+    let ctx = replays::context();
     let mut lines = Vec::new();
+    let mut replay_failures = Vec::new();
     for scenario in &selected(only)? {
-        for c in scenario.run_with_interval(checkpoint_every)? {
+        let checkpoints = scenario.run_with_interval(checkpoint_every)?;
+        for c in &checkpoints {
             lines.push(format!(
                 "{} {:08} {:016x}\n",
                 scenario.name(),
@@ -198,9 +253,55 @@ pub fn run(only: Option<&str>, checkpoint_every: u64) -> Result<String, Error> {
                 c.hash
             ));
         }
+        let Entry::Sim(s) = scenario else {
+            continue;
+        };
+        if s.commands.is_empty() {
+            continue;
+        }
+        let recording = replays::record(s)?;
+        // The recording is a second run in the same process: it must end where
+        // the live run did.
+        let live = checkpoints.last().map(|c| (c.tick, c.hash));
+        if live != Some((recording.final_tick, recording.final_hash)) {
+            return Err(Error::LiveMismatch(s.name));
+        }
+        lines.push(format!(
+            "{}.replay {:08} {:016x}\n",
+            s.name,
+            recording.final_tick,
+            replays::fnv1a64(&recording.bytes)
+        ));
+        if let Err(e) = replays::verify(s.name, &recording.bytes, &ctx) {
+            replay_failures.push(e);
+        }
     }
     lines.sort_unstable();
-    Ok(lines.concat())
+    Ok(Report {
+        text: lines.concat(),
+        replay_failures,
+    })
+}
+
+/// Like [`run_report`], for callers that treat a replay that does not verify
+/// as a failure.
+///
+/// # Errors
+///
+/// [`Error`] for an unknown scenario name, a scenario that fails, or a replay
+/// that does not verify ([`Error::Replay`]).
+///
+/// ```
+/// let text = determinism::run(Some("orbit-coast"), 120)?;
+/// assert!(text.lines().any(|l| l.starts_with("orbit-coast.replay 00001200 ")));
+/// # Ok::<(), determinism::Error>(())
+/// ```
+pub fn run(only: Option<&str>, checkpoint_every: u64) -> Result<String, Error> {
+    let report = run_report(only, checkpoint_every)?;
+    match report.replay_failures.into_iter().next() {
+        Some(e) => Err(e),
+        None => Ok(report.text),
+    }
 }
 
 #[cfg(test)]

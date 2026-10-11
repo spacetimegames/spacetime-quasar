@@ -8,6 +8,7 @@ toc::[]
 Accepted. The replay version policy (version-locked replays) is an
 assumption pending owner confirmation; see <<product-questions>>.
 Update 2026-10-11: PD-33 confirms version-locked replays and makes them player-facing in the MVP.
+Erratum 2026-10-11: until `physics-swarm` and `combat-60s` exist, the replay pin covers every scenario except `data-fixtures` (SPAC-127).
 
 == Date
 
@@ -518,10 +519,10 @@ each `end_hash` with `state_hash()` (<<divergence>>).
 [[version-policy]]
 === Version policy
 
-*Assumption, pending owner confirmation:* replays are *version-locked*. A
-replay plays only in a build with the same simulation version as the build
-that recorded it. Saves are upgrade-safe under ADR 0010; a replay is not a
-save. ADR 0007 already lists this as an open product question.
+Replays are *version-locked* (confirmed by PD-33, which also makes them
+player-facing). A replay plays only in a build with the same simulation
+version as the build that recorded it. Saves are upgrade-safe under ADR 0010;
+a replay is not a save.
 
 * `st_sim::SIM_VERSION: u32` starts at 1 with the first `st-sim` that writes
   replays. It is bumped by any PR that:
