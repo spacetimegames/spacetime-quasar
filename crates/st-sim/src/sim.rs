@@ -1220,7 +1220,8 @@ mod tests {
             radius: big,
             cooldown_ticks: u32::MAX,
         };
-        let variants: Vec<Box<dyn Fn(&mut Setup)>> = vec![
+        type Change = Box<dyn Fn(&mut Setup)>;
+        let variants: Vec<Change> = vec![
             Box::new(move |s| s.ships[0].drag = big),
             Box::new(move |s| s.ships[0].max_accel = big),
             Box::new(move |s| s.ships[0].max_turn_rate = big),

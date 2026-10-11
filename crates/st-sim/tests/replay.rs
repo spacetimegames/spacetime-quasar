@@ -837,7 +837,8 @@ fn the_format_rules_for_segments_are_enforced() {
 fn a_replay_with_a_hostile_setup_is_refused_never_a_panic() {
     use st_sim::SetupError;
     let base = scenarios::solo_burn();
-    let hostile: Vec<(Box<dyn Fn(&mut st_sim::Setup)>, SetupError)> = vec![
+    type Change = Box<dyn Fn(&mut st_sim::Setup)>;
+    let hostile: Vec<(Change, SetupError)> = vec![
         (
             Box::new(|s| s.ships[0].drag = -1.0e5),
             SetupError::BadDynamics(1),

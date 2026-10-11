@@ -153,7 +153,10 @@ fn a_cruise_speed_above_20_km_per_s_is_not_clamped() {
             next += 1;
         }
         sim.step(&s.commands[start..next]).unwrap();
-        peak = peak.max(sim.ship_state(2).unwrap().1.length());
+        let speed = sim.ship_state(2).unwrap().1.length();
+        if speed > peak {
+            peak = speed;
+        }
     }
     assert!(peak > 29_000.0, "the cruise ship peaked at {peak} m/s");
     let (position, velocity) = sim.ship_state(2).unwrap();
