@@ -1,0 +1,28 @@
+= PD-33: Replays: version-locked and player-facing
+:description: Product decision PD-33
+
+* *Date:* 2026-10-11
+* *Resolves:* the replay questions of xref:../adr/0009-command-log-and-replay-format.adoc[ADR 0009]
+
+*Context.* ADR 0009 assumed version-locked replays and left open whether replays are a player feature or a developer tool.
+
+*Decision.*
+
+* Replays are version-locked: a replay is playable only by the build that recorded it, as in ADR 0009.
+* Replays are a player-facing feature in the MVP: record, view, and share a replay file.
+
+*Open sub-questions* (for later design, not decided here).
+
+* Automatic recording of every session, or manual recording.
+* The viewer UI (timeline, seeking, speed).
+* Recording length: whole sessions or encounters only.
+
+*Alternatives considered.*
+
+* A developer and test tool only: rejected, the owner wants replays for players.
+* Replays that survive game updates: rejected for now, the cost is high (ADR 0009).
+
+*Consequences.*
+
+* The `st-game` viewer and sharing work enters the plan (SPAC-121).
+* Because replays are version-locked, sharing a replay requires the same build on both sides. The file must carry enough version information for a clear error otherwise.

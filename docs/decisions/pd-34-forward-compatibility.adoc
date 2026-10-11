@@ -1,0 +1,21 @@
+= PD-34: Forward compatibility of saves and designs
+:description: Product decision PD-34
+
+* *Date:* 2026-10-11
+* *Resolves:* the compatibility question of xref:../adr/0010-data-schema-versioning.adoc[ADR 0010]
+
+*Context.* ADR 0010 refuses, with a clear error, to open a save or design written by a newer build. The question was whether to keep that.
+
+*Decision.*
+
+* Keep the ADR 0010 policy. An older build refuses to open a save or design written by a newer build, with a clear error.
+* Newer builds keep opening older files.
+
+*Alternatives considered.*
+
+* Lenient reading of newer files by older builds: rejected, it can silently drop content on re-save.
+
+*Consequences.*
+
+* No change to ADR 0010.
+* Still open and not decided here: whether a design that fails the current rules can be opened in the shipyard for repair.

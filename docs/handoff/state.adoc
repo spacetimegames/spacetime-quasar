@@ -45,7 +45,7 @@ All of this is on `main`.
 * `st-data` core: versioned RON envelope, migrations, canonical BLAKE3 hashes and diagnostics (PR #19).
 * `st-platform` core: filesystem, clock, and a hot-reload watcher behind a feature (PR #21).
 * The flake keeps `.ron` data files in its source filter (PR #22).
-* Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0010, the product decision records PD-01 to PD-30, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
+* Docs: the xref:../index.adoc[index] and stubs, ADRs 0001 to 0010, the product decision records PD-01 to PD-34, `AGENTS.md`, `README.adoc` and the xref:../60-contributing.adoc[contributing guide].
 
 == Next
 
@@ -70,17 +70,14 @@ After `st-math`, in order:
 
 Needed before Phase N means the answer must exist before that phase starts.
 
-* Needed before the Phase 3 save-format work: should an older build open a save or design made by a newer build? ADR 0010 currently refuses.
 * Needed before the Phase 3 save-format work: can a design that fails the current rules be opened in the shipyard for repair?
-* Needed before the ADR 0007 assumptions are final: the speed envelope. Assumed: normal flight at most 1,000 m/s, cruise at most 10 times that, systems about 2,000 km in radius.
-* Needed before the ADR 0007 assumptions are final: system-edge behaviour. Assumed: a soft boundary (warning, then slowing or pushback), so a ship never reaches the validity bound.
-* Needed before replays become player-facing (ADR 0009): should replays keep playing after a game update? ADR 0009 assumes they do not (version-locked).
-* Needed before the Phase 2 `st-game` replay work (ADR 0009): are replays player-facing in the MVP (automatic recording, a viewer with seeking, sharing), or a developer and test tool for now?
+* Provisional: the PD-31 speed and scale values are starting points; the owner confirms them after a hands-on test (Phase 1 and 2 demos).
+* Open sub-questions of PD-33: automatic or manual replay recording, and the viewer UI.
 * Later, needed before Phase 3: G4 navigation and jumps, G6 factions and law, G8 missions, G11 saves and sessions. Needed before Phase 5: G14 audio direction.
 * Licence: deferred by the owner. All rights reserved meanwhile. To be decided at the first crate publication review or the MVP release, whichever comes first (open point #7).
 * Open point #15, the native X11 test session, is parked until Phase 6.
 
-G2, G5 (basic), G7 and G9 (basic) are answered (PD-27 to PD-30). G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
+G2, G5 (basic), G7 and G9 (basic) are answered (PD-27 to PD-30). The speed envelope (provisional), system edge, replay and save-compatibility questions are answered (PD-31 to PD-34). G10 (space scale) is answered (PD-26) and feeds the Phase 1 large-world coordinates ADR.
 
 == Where to start
 

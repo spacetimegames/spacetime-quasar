@@ -161,4 +161,24 @@ Supporting material: xref:research-gpu-relative-performance-2026-10.adoc[GPU rel
 |Traffic basics: four archetypes, medium density
 |2026-10-11
 |xref:pd-30-traffic-basics.adoc[pd-30-traffic-basics.adoc]
+
+|PD-31
+|Speed and scale envelope (provisional)
+|2026-10-11
+|xref:pd-31-speed-and-scale-envelope.adoc[pd-31-speed-and-scale-envelope.adoc]
+
+|PD-32
+|System edge: no boundary
+|2026-10-11
+|xref:pd-32-system-edge.adoc[pd-32-system-edge.adoc]
+
+|PD-33
+|Replays: version-locked and player-facing
+|2026-10-11
+|xref:pd-33-replays.adoc[pd-33-replays.adoc]
+
+|PD-34
+|Forward compatibility of saves and designs
+|2026-10-11
+|xref:pd-34-forward-compatibility.adoc[pd-34-forward-compatibility.adoc]
 |===
