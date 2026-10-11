@@ -50,5 +50,5 @@ pub mod scenarios;
 mod sim;
 
 pub use command::{Command, CommandKind, ControlState, PilotId, StepError};
-pub use hash::{HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
+pub use hash::{DumpLine, HASH_FORMAT_VERSION, HashError, StateHash, StateHasher};
 pub use sim::{CHECKPOINT_INTERVAL, Setup, SetupError, ShipInit, Sim};
